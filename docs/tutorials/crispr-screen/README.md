@@ -233,17 +233,33 @@ outerspace stats -c grnaquery.toml \
 
 For more stringent analysis, you can filter results to only include expected protospacers:
 
-### Step 3b: Count with Allowed List
+### Step 3b: Count with Allowed List and Key Rescue
 
 ```bash
-# Count barcodes using only library protospacers
+# Count barcodes using only library protospacers and rescue near-miss keys
 outerspace count -c grnaquery.toml \
     --input-dir results/collapse \
     --output-dir results/count_filtered \
-    --allowed-list data/library_protospacers.txt
+    --allowed-list data/library_protospacers.txt \
+    --key-rescue --key-min-score 17 --key-match-score 1 \
+    --key-mismatch-penalty -1 --key-gap-penalty -3
 ```
 
-**Note**: The `--allowed-list` parameter overrides any config file settings to add filtering.
+**Notes**:
+- The `--allowed-list` parameter enables filtering to expected protospacers.
+- You can enable key rescue directly in the TOML (recommended for reproducibility):
+
+```toml
+[count]
+allowed_list = 'data/library_protospacers.txt'
+key_rescue = true
+key_mismatch_penalty = -1
+key_gap_penalty = -3
+key_match_score = 1
+key_min_score = 17
+```
+
+Command-line flags will override TOML values when provided.
 
 ### Step 4b: Merge Filtered Results
 
@@ -338,4 +354,4 @@ After completing this tutorial, you can:
 **Parameter conflicts**: Command-line arguments always override config file settings
 
 
-### Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
+Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
