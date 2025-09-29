@@ -16,7 +16,6 @@ dependencies = [
     "tomlkit",
     "tqdm",
     "pyfastx",
-    "pyspoa",
     "regex",
     "umi_tools",
     "pyyaml",
