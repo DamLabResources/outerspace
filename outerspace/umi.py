@@ -125,6 +125,7 @@ def _cluster_size(counts: Dict[bytes, int], cluster: List[bytes]) -> int:
     return sum(counts[bc] for bc in cluster)
 
 
+
 class UMI:
     """Class for handling UMI clustering and correction.
 
