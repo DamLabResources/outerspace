@@ -78,7 +78,12 @@ def find_closest_umi(
 
         # Calculate alignment score using global alignment with custom scoring
         score = calculate_alignment_score(
-            query_umi, candidate_str, mismatch_penalty, gap_penalty, match_score
+            query_umi,
+            candidate_str,
+            mismatch_penalty,
+            gap_penalty,
+            match_score,
+            min_score,
         )
         
         # Update best match if this scores higher and meets minimum threshold
@@ -95,7 +100,12 @@ def find_closest_umi(
 
 @lru_cache(maxsize=1000)
 def calculate_alignment_score(
-    seq1: str, seq2: str, mismatch_penalty: int, gap_penalty: int, match_score: int
+    seq1: str,
+    seq2: str,
+    mismatch_penalty: int,
+    gap_penalty: int,
+    match_score: int,
+    min_score_cutoff: Optional[int] = None,
 ) -> int:
     """Calculate a global alignment score using simple dynamic programming.
     
@@ -106,15 +116,24 @@ def calculate_alignment_score(
     
     This function computes the Needleman–Wunsch global alignment score without
     traceback, returning only the optimal score.
+    If ``min_score_cutoff`` is provided and the dynamic programming state proves
+    the optimal score cannot reach the cutoff, the function returns a value
+    strictly less than the cutoff early.
     """
 
     # Fast paths for empty inputs
     if not seq1 and not seq2:
         return 0
     if not seq1:
-        return len(seq2) * gap_penalty
+        score = len(seq2) * gap_penalty
+        if min_score_cutoff is not None and score < min_score_cutoff:
+            return min_score_cutoff - 1
+        return score
     if not seq2:
-        return len(seq1) * gap_penalty
+        score = len(seq1) * gap_penalty
+        if min_score_cutoff is not None and score < min_score_cutoff:
+            return min_score_cutoff - 1
+        return score
 
     len1 = len(seq1)
     len2 = len(seq2)
@@ -127,17 +146,49 @@ def calculate_alignment_score(
     for j in range(1, len2 + 1):
         prev_row[j] = prev_row[j - 1] + gap_penalty
 
+    # Early-abort feasibility checks apply only under standard scoring where
+    # matches are non-negative and mismatches/gaps do not increase the score.
+    can_prune = (
+        min_score_cutoff is not None
+        and match_score >= 0
+        and mismatch_penalty <= 0
+        and gap_penalty <= 0
+    )
+
+    # Global optimistic bound from the start
+    if can_prune:
+        max_initial = min(len1, len2) * match_score
+        if max_initial < min_score_cutoff:  # impossible to reach cutoff
+            return min_score_cutoff - 1
+
     for i in range(1, len1 + 1):
         # Base case for this row: aligning prefix of seq1 with empty prefix of seq2
         curr_row[0] = prev_row[0] + gap_penalty
 
         ch1 = seq1[i - 1]
+        row_best = None
         for j in range(1, len2 + 1):
             ch2 = seq2[j - 1]
             diag = prev_row[j - 1] + (match_score if ch1 == ch2 else mismatch_penalty)
             up = prev_row[j] + gap_penalty      # gap in seq2 (deletion from seq1)
             left = curr_row[j - 1] + gap_penalty  # gap in seq1 (insertion into seq1)
-            curr_row[j] = max(diag, up, left)
+            val = diag if diag >= up and diag >= left else (up if up >= left else left)
+            curr_row[j] = val
+            if row_best is None or val > row_best:
+                row_best = val
+
+        # Prune if even the most optimistic completion of this row can't hit cutoff
+        if can_prune:
+            # Remaining positions that could contribute positively as matches
+            # For any position j in this completed row, the maximum extra is
+            # (min(len1 - i, len2 - j)) * match_score. The maximum over j is
+            # achieved at the smallest j (i.e., j=0), but j=0 may not be the
+            # position of row_best. To keep this cheap and admissible, use the
+            # most optimistic bound based on row_best at some j and allow up to
+            # min(len1 - i, len2) future matches.
+            optimistic_extra = min(len1 - i, len2) * match_score
+            if (row_best or 0) + optimistic_extra < min_score_cutoff:
+                return min_score_cutoff - 1
 
         # Prepare for next iteration
         prev_row, curr_row = curr_row, prev_row
