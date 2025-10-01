@@ -5,7 +5,7 @@ of allowed UMIs using a configurable global alignment scoring system.
 """
 
 import logging
-from typing import Optional, Tuple, List, Iterable
+from typing import Optional, Tuple, List, Iterable, Dict, Set
 from functools import lru_cache
 
 # Set up logging
@@ -29,12 +29,24 @@ class NearestUMIFinder:
         gap_penalty: int = -3,
         match_score: int = 1,
         min_score: int = 0,
+        use_prescreen: bool = True,
+        kmer_size: int = 3,
+        min_kmer_overlap: int = 1,
     ) -> None:
         self._allowed_umis_tuple: Tuple[str, ...] = tuple(allowed_list or ())
+        self._allowed_set: Set[str] = set(self._allowed_umis_tuple)
         self.mismatch_penalty = mismatch_penalty
         self.gap_penalty = gap_penalty
         self.match_score = match_score
         self.min_score = min_score
+        self._use_prescreen = use_prescreen
+        self._kmer_size = kmer_size
+        self._min_kmer_overlap = min_kmer_overlap
+
+        # Pre-computed k-mer sets and inverted index for prescreening
+        self._kmer_sets: Dict[str, frozenset] = {}
+        if self._use_prescreen:
+            self._rebuild_kmer_index()
 
     @property
     def allowed_list(self) -> List[str]:
@@ -43,12 +55,18 @@ class NearestUMIFinder:
     def set_allowed_list(self, allowed_list: Iterable[str]) -> None:
         """Replace the allowed UMI list."""
         self._allowed_umis_tuple = tuple(allowed_list or ())
+        self._allowed_set = set(self._allowed_umis_tuple)
+        if self._use_prescreen:
+            self._rebuild_kmer_index()
 
     def add_allowed(self, umi: str) -> None:
         """Add a single UMI to the allowed list."""
         if umi in self._allowed_umis_tuple:
             return
         self._allowed_umis_tuple = tuple(list(self._allowed_umis_tuple) + [umi])
+        self._allowed_set.add(umi)
+        if self._use_prescreen:
+            self._kmer_sets[umi] = self._kmerize(umi)
 
     def find(self, query_umi: str) -> Optional[List[str]]:
         """Find closest allowed UMI(s) for a single query.
@@ -59,12 +77,22 @@ class NearestUMIFinder:
         if not self._allowed_umis_tuple or not query_umi:
             return None
 
+        # Exact match short-circuit using set membership
+        if query_umi in self._allowed_set:
+            return [query_umi]
+
         # Initialize tracking of best matches
         best_matches: List[str] = []
         best_score: int = self.min_score - 1
 
+        # Determine candidate subset via k-mer prescreen if enabled
+        if self._use_prescreen and self._kmer_size and self._kmer_size > 0:
+            kmers = self._kmerize(query_umi)
+        else:
+            kmers = None
+
         # Iterate candidates
-        for candidate_str in self._iter_candidates():
+        for candidate_str in self._iter_candidates(query_kmers=kmers):
             # Exact match short-circuit
             if self._is_exact_match(candidate_str, query_umi):
                 return [candidate_str]
@@ -86,8 +114,13 @@ class NearestUMIFinder:
         return [self.find(q) for q in query_umis]
 
     # ---------- Private helpers ----------
-    def _iter_candidates(self) -> Tuple[str, ...]:
-        return self._allowed_umis_tuple
+    def _iter_candidates(self, query_kmers: Optional[frozenset] = None) -> Iterable[str]:
+        if query_kmers:
+            for cand, cand_kmers in self._kmer_sets.items():
+                if len(cand_kmers.intersection(query_kmers)) >= self._min_kmer_overlap:
+                    yield cand
+        else:
+            yield from self._allowed_umis_tuple
 
     def _is_exact_match(self, candidate: str, query: str) -> bool:
         return candidate == query
@@ -104,6 +137,27 @@ class NearestUMIFinder:
 
     def _below_threshold(self, score: int) -> bool:
         return score < self.min_score
+
+    def _kmerize(self, seq: str) -> frozenset:
+        """Return a frozenset of sliding k-mers for a sequence.
+
+        If the sequence is shorter than k, returns a singleton set of the sequence
+        to preserve some overlap semantics.
+        """
+        k = self._kmer_size
+        if k <= 0:
+            return frozenset()
+        if len(seq) < k:
+            return frozenset([seq])
+        return frozenset(seq[i : i + k] for i in range(len(seq) - k + 1))
+
+    def _rebuild_kmer_index(self) -> None:
+        """Rebuild k-mer sets and inverted index from the allowed list."""
+        self._kmer_sets = {}
+        if not self._allowed_umis_tuple:
+            return
+        for cand in self._allowed_umis_tuple:
+            self._kmer_sets[cand] = self._kmerize(cand)
 
     @staticmethod
     def _calculate_alignment_score(

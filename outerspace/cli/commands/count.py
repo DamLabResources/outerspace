@@ -23,7 +23,7 @@ from outerspace.cli.commands.base import BaseCommand
 from outerspace.umi import UMI
 from outerspace.stats import GiniCoefficient
 from outerspace.cli.logging_config import setup_logging
-from outerspace.nearest import find_closest_umi
+from outerspace.nearest import NearestUMIFinder
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -127,6 +127,31 @@ class CountCommand(BaseCommand):
             type=int,
             default=-3,
             help="Penalty for gaps/indels when aligning keys (default: -3)",
+        )
+
+        # K-mer prescreen parameters
+        parser.add_argument(
+            "--key-rescue-kmer-size",
+            type=int,
+            default=3,
+            help="K-mer size for approximate key prescreen (default: 3)",
+        )
+        parser.add_argument(
+            "--key-rescue-min-overlap",
+            type=int,
+            default=1,
+            help=(
+                "Minimum number of shared k-mers required before alignment "
+                "(default: 1)"
+            ),
+        )
+        parser.add_argument(
+            "--key-rescue-exhaustive",
+            action="store_true",
+            help=(
+                "Disable k-mer prescreen and align against all allowed keys "
+                "(slower, exhaustive search)"
+            ),
         )
 
         parser.add_argument(
@@ -236,6 +261,20 @@ class CountCommand(BaseCommand):
 
         allowed_keys_set = set(allowed_keys_ordered) if allowed_keys_ordered else set()
 
+        # Prepare nearest finder with k-mer prescreen if rescue is enabled
+        finder = None
+        if self.args.key_rescue and allowed_keys_ordered:
+            finder = NearestUMIFinder(
+                allowed_list=allowed_keys_ordered,
+                mismatch_penalty=key_mismatch_penalty if key_mismatch_penalty is not None else -1,
+                gap_penalty=key_gap_penalty if key_gap_penalty is not None else -3,
+                match_score=key_match_score if key_match_score is not None else 1,
+                min_score=key_min_score if key_min_score is not None else 0,
+                use_prescreen=not self.args.key_rescue_exhaustive,
+                kmer_size=self.args.key_rescue_kmer_size,
+                min_kmer_overlap=self.args.key_rescue_min_overlap,
+            )
+
         # Read rows and collect barcodes per key
         barcodes_by_key = defaultdict(set)
         total_rows = 0
@@ -284,18 +323,9 @@ class CountCommand(BaseCommand):
                     continue
 
                 # Case 3: key not in allowed_keys; attempt rescue if enabled
-                if self.args.key_rescue:
-                    # Map this key to the closest allowed keys; here we use the same
-                    # alignment function, passing the set of allowed keys as candidates
-                    # Will return a list of keys that are all equally close to the key
-                    mapped_keys = find_closest_umi(
-                        allowed_keys_ordered,
-                        key,
-                        mismatch_penalty=key_mismatch_penalty,
-                        gap_penalty=key_gap_penalty,
-                        match_score=key_match_score,
-                        min_score=key_min_score,
-                    )
+                if self.args.key_rescue and finder is not None:
+                    # Use NearestUMIFinder with k-mer prescreen to map to allowed keys
+                    mapped_keys = finder.find(key)
                     if mapped_keys:
                         mapped_key = None
                         # If there is only one mapped key, use it
