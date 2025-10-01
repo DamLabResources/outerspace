@@ -245,9 +245,57 @@ outerspace count -c grnaquery.toml \
     --key-mismatch-penalty -1 --key-gap-penalty -3
 ```
 
+#### Prescreening strategy for key rescue (k-mer approximate matching)
+
+When `--key-rescue` is enabled, OUTERSPACE accelerates nearest-key lookup with a k-mer prescreen:
+
+- It precomputes sliding k-mers for every allowed key
+- For each query key, it computes its k-mers and only aligns against allowed keys that share at least a minimum number of k-mers
+- This radically reduces expensive alignments without changing final results under typical settings
+
+You can tune the prescreen with these flags:
+
+- `--key-rescue-kmer-size`: k-mer length used for prescreening (default: 3)
+- `--key-rescue-min-overlap`: minimum shared k-mers required to attempt alignment (default: 1)
+- `--key-rescue-exhaustive`: disable prescreen and align against all allowed keys (slower)
+
+Examples:
+
+```bash
+# Stricter prescreen (fewer alignments)
+outerspace count -c grnaquery.toml \
+  --input-dir results/collapse \
+  --output-dir results/count_filtered \
+  --allowed-list data/library_protospacers.txt \
+  --key-rescue \
+  --key-rescue-kmer-size 4 \
+  --key-rescue-min-overlap 2
+```
+
+```bash
+# Exhaustive search (no prescreen)
+outerspace count -c grnaquery.toml \
+  --input-dir results/collapse \
+  --output-dir results/count_filtered \
+  --allowed-list data/library_protospacers.txt \
+  --key-rescue \
+  --key-rescue-exhaustive
+```
+
+In TOML configs, you can set:
+
+```toml
+[count]
+key_rescue = true
+key_rescue_kmer_size = 3     # same as --key-rescue-kmer-size
+key_rescue_min_overlap = 8   # same as --key-rescue-min-overlap
+```
+
+Command-line flags override TOML values when both are provided. Use exhaustive mode from the CLI if you want to temporarily disable the prescreen for testing.
+
 **Notes**:
 - The `--allowed-list` parameter enables filtering to expected protospacers.
-- You can enable key rescue directly in the TOML (recommended for reproducibility):
+- You can enable key rescue directly in the TOML (recommended for increasing the number of useful reads):
 
 ```toml
 [count]
