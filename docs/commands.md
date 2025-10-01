@@ -113,6 +113,7 @@ usage: outerspace count [-h] (--input-file INPUT_FILE | --input-dir INPUT_DIR)
                         [--key-match-score KEY_MATCH_SCORE]
                         [--key-mismatch-penalty KEY_MISMATCH_PENALTY]
                         [--key-gap-penalty KEY_GAP_PENALTY]
+                        [--key-rescue-strategy KEY_RESCUE_STRATEGY]
                         [--detailed] [--downsample DOWNSAMPLE] [--random-seed RANDOM_SEED]
                         [--config CONFIG] [--progress-bar] [--log-file LOG_FILE] 
                         [--log-level LOG_LEVEL]
@@ -148,6 +149,9 @@ options:
                         Penalty for mismatches when aligning keys (default: -1)
   --key-gap-penalty KEY_GAP_PENALTY
                         Penalty for gaps/indels when aligning keys (default: -3)
+  --key-rescue-strategy KEY_RESCUE_STRATEGY
+                        Strategy to choose among multiple equally good rescued keys
+                        (choices: random, first, last, all; default: random)
   --detailed            Include barcode lists in output
   --downsample DOWNSAMPLE
                         Randomly sample reads with probability between 0 and 1

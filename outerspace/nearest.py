@@ -5,7 +5,7 @@ of allowed UMIs using a configurable global alignment scoring system.
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from functools import lru_cache
 
 # Set up logging
@@ -23,7 +23,7 @@ def find_closest_umi(
     gap_penalty: int = -3,
     match_score: int = 1,
     min_score: int = 0
-) -> Optional[str]:
+) -> List[str]:
     """Find the closest UMI match above a minimum score threshold.
     
     This function computes a global alignment score between the query and each
@@ -49,7 +49,7 @@ def find_closest_umi(
     
     Returns
     -------
-    Optional[str]
+    List[str]
         The best scoring UMI from allowed_umis if found above min_score,
         None otherwise.
         
@@ -59,7 +59,8 @@ def find_closest_umi(
     if not allowed_umis or not query_umi:
         return None
     
-    best_match = None
+    # Initialize best matches and score
+    best_matches = [] # List of matches with best score
     best_score = min_score - 1  # Start below minimum threshold
     
     # Perfect score for an exact match of equal length
@@ -70,11 +71,7 @@ def find_closest_umi(
         
         # If exact match, short-circuit
         if candidate_str == query_umi:
-            if max_possible_score >= min_score:
-                return candidate_str
-            # If an exact match does not meet the threshold, we still compute
-            # other candidates in case a longer sequence could somehow score higher
-            # (e.g., with positive gap/mismatch scores). Fall through to scoring.
+            return [candidate_str]
 
         # Calculate alignment score using global alignment with custom scoring
         score = calculate_alignment_score(
@@ -86,16 +83,19 @@ def find_closest_umi(
             best_score,
         )
         
-        # Update best match if this scores higher and meets minimum threshold
-        if score >= min_score and score > best_score:
+        # If score is less than minimum threshold, skip
+        if score < min_score:
+            continue
+
+        if score == best_score:
+            # Scores the same as the best score, add to list
+            best_matches.append(candidate_str)
+        elif score > best_score:
+            # Scores higher than the best score, update best score and list
             best_score = score
-            best_match = candidate_str
-            
-            # If we found a perfect score for equal-length sequences, return immediately
-            if score == max_possible_score and len(candidate_str) == len(query_umi):
-                break
-    
-    return best_match
+            best_matches = [candidate_str]
+        
+    return best_matches
 
 
 @lru_cache(maxsize=50_000)

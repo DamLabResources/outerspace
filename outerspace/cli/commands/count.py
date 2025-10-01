@@ -128,6 +128,13 @@ class CountCommand(BaseCommand):
             default=-3,
             help="Penalty for gaps/indels when aligning keys (default: -3)",
         )
+
+        parser.add_argument(
+            "--key-rescue-strategy",
+            type=str,
+            default="random",
+            help="Strategy to choose the best mapped key when multiple are found (default: random)",
+        )
         self._add_common_args(parser)
 
     def _read_allowed_keys(self, filepath: str) -> Tuple[str, ...]:
@@ -225,6 +232,9 @@ class CountCommand(BaseCommand):
         key_umi = UMI(mismatches=0)  # For key counts
 
         rescued_count = 0
+        multiple_rescued_count = 0
+
+        allowed_keys_set = set(allowed_keys_ordered) if allowed_keys_ordered else set()
 
         # Read rows and collect barcodes per key
         barcodes_by_key = defaultdict(set)
@@ -254,30 +264,31 @@ class CountCommand(BaseCommand):
                 key = str(row[key_col])
                 barcode = str(row[barcode_col])
 
+                if not key or not barcode:
+                    continue
+
                 # Counting logic
                 # Case 1: No allowed_keys list provided -> count all (key, barcode)
                 if not allowed_keys_ordered:
-                    if key and barcode:
-                        barcodes_by_key[key].add(barcode)
-                        umi.consume(barcode)
-                        key_umi.consume(key)
+                    barcodes_by_key[key].add(barcode)
+                    umi.consume(barcode)
+                    key_umi.consume(key)
                     continue
 
-                # Case 2: allowed_keys provided
-                allowed_keys_set = set(allowed_keys_ordered)
+                # Case 2: allowed_keys provided and key is in the set
                 if key in allowed_keys_set:
                     rows_with_allowed_key += 1
-                    if key and barcode:
-                        barcodes_by_key[key].add(barcode)
-                        umi.consume(barcode)
-                        key_umi.consume(key)
+                    barcodes_by_key[key].add(barcode)
+                    umi.consume(barcode)
+                    key_umi.consume(key)
                     continue
 
                 # Case 3: key not in allowed_keys; attempt rescue if enabled
-                if self.args.key_rescue and key:
-                    # Map this key to the closest allowed key; here we use the same
+                if self.args.key_rescue:
+                    # Map this key to the closest allowed keys; here we use the same
                     # alignment function, passing the set of allowed keys as candidates
-                    mapped_key = find_closest_umi(
+                    # Will return a list of keys that are all equally close to the key
+                    mapped_keys = find_closest_umi(
                         allowed_keys_ordered,
                         key,
                         mismatch_penalty=key_mismatch_penalty,
@@ -285,13 +296,38 @@ class CountCommand(BaseCommand):
                         match_score=key_match_score,
                         min_score=key_min_score,
                     )
-                    if mapped_key is not None:
-                        rescued_count += 1
-                        if barcode:
+                    if mapped_keys:
+                        mapped_key = None
+                        # If there is only one mapped key, use it
+                        if len(mapped_keys) == 1:
+                            mapped_key = mapped_keys[0]
+                        else:
+                            multiple_rescued_count += 1
+                            # If there are multiple mapped keys, use the strategy to choose one
+                            if self.args.key_rescue_strategy == "random":
+                                mapped_key = random.choice(mapped_keys)
+                            elif self.args.key_rescue_strategy == "first":
+                                mapped_key = mapped_keys[0]
+                            elif self.args.key_rescue_strategy == "last":
+                                mapped_key = mapped_keys[-1]
+                            elif self.args.key_rescue_strategy == "all":
+                                rescued_count += 1
+                                for mapped_key in mapped_keys:
+                                    barcodes_by_key[mapped_key].add(barcode)
+                                    umi.consume(barcode)
+                                    key_umi.consume(mapped_key)
+                                continue
+                            
+                        if mapped_key:
+                            rescued_count += 1
                             barcodes_by_key[mapped_key].add(barcode)
                             umi.consume(barcode)
                             key_umi.consume(mapped_key)
+
                         continue
+                        
+                        
+                        
 
                 # If not rescued, ignore this key (do not count)
                 continue
@@ -323,6 +359,7 @@ class CountCommand(BaseCommand):
         # Log rescue info if applicable
         if self.args.key_rescue and allowed_keys_ordered:
             logger.info(f"Keys rescued (mapped to allowed list): {rescued_count}")
+            logger.info(f"Keys rescued (mapped to allowed list with multiple matches): {multiple_rescued_count}")
 
         if allowed_keys_ordered:
             logger.info(f"Rows with allowed key: {rows_with_allowed_key}")
