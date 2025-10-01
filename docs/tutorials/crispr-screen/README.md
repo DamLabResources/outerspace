@@ -241,17 +241,26 @@ outerspace count -c grnaquery.toml \
     --input-dir results/collapse \
     --output-dir results/count_filtered \
     --allowed-list data/library_protospacers.txt \
-    --key-rescue --key-min-score 17 --key-match-score 1 \
-    --key-mismatch-penalty -1 --key-gap-penalty -3
+    --key-rescue --key-min-score -3 --key-match-score 0 \
+    --key-mismatch-penalty -1 --key-gap-penalty -2 \
+    --key-rescue-strategy 'all'
 ```
+
+#### Key rescue uses NW alignment to find hits with mismatches
+
+When `--key-rescue` is enabled, any protospacer which doesn't match an allowed protospacer will be matche d to the nearest one.
+With `--key-rescue-strategy 'all'`, all protospacers with the same minimum score will be attributed a fractional count.
+This can also be set to `first`, `last`, or `random`.
+
+The n-wise global aligment search is a costly operation to perform on each read.
+In order to accelerate this process, an approximate matching method has been employed.
 
 #### Prescreening strategy for key rescue (k-mer approximate matching)
 
-When `--key-rescue` is enabled, OUTERSPACE accelerates nearest-key lookup with a k-mer prescreen:
-
 - It precomputes sliding k-mers for every allowed key
 - For each query key, it computes its k-mers and only aligns against allowed keys that share at least a minimum number of k-mers
-- This radically reduces expensive alignments without changing final results under typical settings
+- This radically reduces expensive alignments
+- Increasing min-overlap improves speed at the cost of increased false negatives
 
 You can tune the prescreen with these flags:
 
