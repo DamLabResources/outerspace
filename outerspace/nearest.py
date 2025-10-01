@@ -15,7 +15,7 @@ __copyright__ = "Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Ri
 __author__ = "WND"
 
 
-@lru_cache(maxsize=1000)
+@lru_cache(maxsize=50_000)
 def find_closest_umi(
     allowed_umis: Tuple[str, ...], 
     query_umi: str, 
@@ -83,7 +83,7 @@ def find_closest_umi(
             mismatch_penalty,
             gap_penalty,
             match_score,
-            min_score,
+            best_score,
         )
         
         # Update best match if this scores higher and meets minimum threshold
@@ -98,7 +98,7 @@ def find_closest_umi(
     return best_match
 
 
-@lru_cache(maxsize=1000)
+@lru_cache(maxsize=50_000)
 def calculate_alignment_score(
     seq1: str,
     seq2: str,
