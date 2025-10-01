@@ -98,7 +98,7 @@ def test_find_closest_umi_exact_match():
     """Test finding exact match"""
     allowed_umis = ("ATCG", "GCTA", "TTAA", "CCGG")
     result = find_closest_umi(allowed_umis, "ATCG")
-    assert result == "ATCG"
+    assert result == ["ATCG"]
 
 
 def test_find_closest_umi_close_match():
@@ -108,7 +108,7 @@ def test_find_closest_umi_close_match():
     # Score: 3 matches (3*1) + 1 mismatch (1*-1) = 2
     # Default min_score is 17, so this won't match with default settings
     result = find_closest_umi(allowed_umis, "ATCC", min_score=2)
-    assert result == "ATCG"
+    assert result == ["ATCG"]
 
 
 def test_find_closest_umi_no_match_below_threshold():
@@ -124,7 +124,7 @@ def test_find_closest_umi_multiple_candidates_best_score():
     """Test that function returns the best scoring match"""
     allowed_umis = ("ATCG", "ATCC", "ATCA")  # All similar to ATCG
     result = find_closest_umi(allowed_umis, "ATCG", min_score=0)
-    assert result == "ATCG"  # Exact match should be best
+    assert result == ["ATCG"] # Exact match should be best
 
 
 def test_find_closest_umi_custom_scoring_parameters():
@@ -136,7 +136,7 @@ def test_find_closest_umi_custom_scoring_parameters():
         allowed_umis, "ATCC", 
         mismatch_penalty=-1, gap_penalty=-3, match_score=2, min_score=5
     )
-    assert result == "ATCG"
+    assert result == ["ATCG"]
     
     # Very strict scoring - require exact match
     result = find_closest_umi(
@@ -154,7 +154,7 @@ def test_find_closest_umi_gap_handling():
         allowed_umis, "ATC",
         mismatch_penalty=-1, gap_penalty=-1, match_score=1, min_score=2
     )
-    assert result == "ATCG"
+    assert result == ["ATCG"]
 
 
 def test_find_closest_umi_early_termination_on_perfect_match():
@@ -162,7 +162,7 @@ def test_find_closest_umi_early_termination_on_perfect_match():
     # Put exact match at end to test early termination logic
     allowed_umis = ("GCTA", "TTAA", "CCGG", "ATCG")
     result = find_closest_umi(allowed_umis, "ATCG", min_score=0)
-    assert result == "ATCG"
+    assert result == ["ATCG"]
 
 
 def test_find_closest_umi_empty_allowed_list():
@@ -199,18 +199,18 @@ def test_find_closest_umi_realistic_umi_scenarios():
     
     # Test exact match
     result = find_closest_umi(allowed_umis, "AAAAAAAA", min_score=6)
-    assert result == "AAAAAAAA"
+    assert result == ["AAAAAAAA"]
     
     # Test single mismatch
     result = find_closest_umi(allowed_umis, "AAAAAAAC", min_score=6)
-    assert result == "AAAAAAAC"
+    assert result == ["AAAAAAAC"]
     
     # Test sequence with single error that should match
     result = find_closest_umi(
         allowed_umis, "AAAAAAAA",  # This is exact match
         mismatch_penalty=-1, gap_penalty=-3, match_score=1, min_score=7
     )
-    assert result == "AAAAAAAA"
+    assert result == ["AAAAAAAA"]
 
 
 def test_find_closest_umi_performance_with_large_list():
@@ -232,14 +232,14 @@ def test_find_closest_umi_edge_case_scoring():
         allowed_umis, "ATCC",
         mismatch_penalty=0, gap_penalty=0, match_score=0, min_score=0
     )
-    assert result == "ATCG"  # Should still work with zero scoring
+    assert result == ["ATCG"]  # Should still work with zero scoring
     
     # Test with positive mismatch "penalty" (actually a reward)
     result = find_closest_umi(
         allowed_umis, "ATCC",
         mismatch_penalty=1, gap_penalty=-1, match_score=1, min_score=3
     )
-    assert result == "ATCG"  # Should work even with positive mismatch score
+    assert result == ["ATCG"]  # Should work even with positive mismatch score
 
 
 def test_score_consistency():
@@ -263,7 +263,7 @@ def test_score_consistency():
     )
     
     # Should find the match since score meets threshold
-    assert result == seq2
+    assert result == [seq2]
     
     # Should not find match if threshold is higher
     result_strict = find_closest_umi(
