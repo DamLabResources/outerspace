@@ -50,7 +50,7 @@ key_match_score = 0
 # Up to 3 mm or 1 indel 1 mm
 key_min_score = -3
 
-key_rescue_strategy = 'all'
+key_rescue_strategy = 'random'
 
 # Approximate matching
 key_rescue_kmer_size = 3

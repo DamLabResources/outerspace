@@ -21,7 +21,7 @@ import yaml
 
 from outerspace.cli.commands.base import BaseCommand
 from outerspace.umi import UMI
-from outerspace.stats import GiniCoefficient
+from outerspace.stats import GiniCoefficient, SimpsonDiversity
 from outerspace.cli.logging_config import setup_logging
 from outerspace.nearest import NearestUMIFinder
 
@@ -366,15 +366,6 @@ class CountCommand(BaseCommand):
         total_keys = len(barcodes_by_key)
         total_barcodes = sum(len(barcodes) for barcodes in barcodes_by_key.values())
 
-        # Calculate Gini coefficients using the stats module
-        barcode_result = GiniCoefficient.calculate(umi)
-        key_result = GiniCoefficient.calculate(
-            key_umi,
-            allowed_list=list(allowed_keys_ordered) if allowed_keys_ordered else None,
-        )
-        barcode_gini = barcode_result
-        key_gini = key_result
-
         # Log statistics
         logger.info(f"File statistics for {os.path.basename(input_file)}:")
         logger.info(f"Total rows scanned: {total_rows}")
@@ -383,8 +374,23 @@ class CountCommand(BaseCommand):
         logger.info(
             f"Average barcodes per key: {total_barcodes / total_keys if total_keys > 0 else 0:.3f}"
         )
+
+        # Calculate Gini coefficients using the stats module
+        barcode_gini = GiniCoefficient.calculate(umi)
+        key_gini = GiniCoefficient.calculate(
+            key_umi,
+            allowed_list=list(allowed_keys_ordered) if allowed_keys_ordered else None,
+        )
         logger.info(f"Barcode Gini coefficient: {barcode_gini:.3f}")
         logger.info(f"Key Gini coefficient: {key_gini:.3f}")
+
+        barcode_simpson = SimpsonDiversity.calculate(umi)
+        key_simpson = SimpsonDiversity.calculate(
+            key_umi,
+            allowed_list=list(allowed_keys_ordered) if allowed_keys_ordered else None,
+        )
+        logger.info(f"Barcode Simpson diversity: {barcode_simpson:.3f}")
+        logger.info(f"Key Simpson diversity: {key_simpson:.3f}")
 
         # Log rescue info if applicable
         if self.args.key_rescue and allowed_keys_ordered:
