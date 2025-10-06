@@ -100,36 +100,53 @@ matches_only = true
 - **`matches_only`**: Only output reads where all patterns are found
 
 ```toml
-[collapse]
-columns = 'UMI_5prime,UMI_3prime'
+# Iterative collapse steps (recommended approach)
+[[collapse.steps]]
+name = "umi_correction"
+columns = "UMI_5prime,UMI_3prime"
+method = "directional"
 mismatches = 2
-method = 'directional'
+
+[[collapse.steps]]
+name = "protospacer_correction"
+columns = "protospacer"
+method = "nearest"
+allowed_list = "data/library_protospacers.txt"
+mismatch_penalty = -1
+gap_penalty = -2
+match_score = 0
+min_score = -3
 ```
 
-- **`columns`**: Which columns to combine for barcode correction
-- **`mismatches`**: Maximum edit distance for clustering similar barcodes
-- **`method`**: UMI-tools clustering algorithm
+The `[[collapse.steps]]` syntax defines **iterative correction steps**:
+- **Step 1 (umi_correction)**: Clusters UMI barcodes using directional method
+  - Creates `UMI_5prime_UMI_3prime_corrected` column
+- **Step 2 (protospacer_correction)**: Rescues protospacers using nearest-neighbor matching
+  - Creates `protospacer_corrected` column
+  - Maps near-miss sequences to allowed list entries
+
+This replaces the old workflow where you'd run collapse for UMIs, then use `count --key-rescue` for protospacer correction. Now both corrections happen in a single `collapse` command!
 
 ```toml
 [count]
 barcode_column = 'UMI_5prime_UMI_3prime_corrected'
-key_column = 'protospacer'
+key_column = 'protospacer_corrected'
 ```
 
 - **`barcode_column`**: Column containing corrected barcodes to count
-- **`key_column`**: Column to group by (protospacer sequences)
+- **`key_column`**: Column to group by (now uses the corrected protospacer column)
 
 ```toml
 [merge]
 column = 'UMI_5prime_UMI_3prime_corrected_count'
-key_column = 'protospacer'
+key_column = 'protospacer_corrected'
 
 [stats]
-key_column = 'protospacer'
+key_column = 'protospacer_corrected'
 count_column = 'UMI_5prime_UMI_3prime_corrected_count'
 ```
 
-These sections define default parameters for the merge and stats commands.
+These sections define default parameters for the merge and stats commands (note they use `protospacer_corrected`).
 
 ## Tutorial Workflow (Configuration File Approach)
 
@@ -164,34 +181,47 @@ outerspace findseq -c grnaquery.toml \
 
 **Expected output**: CSV files containing extracted UMI and protospacer sequences for each sample.
 
-### Step 2: Correct Barcodes (collapse)
+### Step 2: Iterative Collapse (UMI + Protospacer Correction)
 
-Correct sequencing errors using the configuration file settings:
+Perform multi-stage correction using the iterative steps defined in the config:
 
 ```bash
-# Correct barcodes for all samples using config
+# Perform iterative collapse using steps from config
 outerspace collapse -c grnaquery.toml \
     --input-dir results/findseq \
-    --output-dir results/collapse
+    --output-dir results/collapsed
 ```
 
 **What this does**:
-- Uses `columns = 'UMI_5prime,UMI_3prime'` from config
-- Applies `mismatches = 2` and `method = 'directional'` from config
-- Creates corrected barcode column: `UMI_5prime_UMI_3prime_corrected`
+- **Step 1 (umi_correction)**: Clusters similar UMI barcodes
+  - Uses `method = 'directional'` with `mismatches = 2`
+  - Creates `UMI_5prime_UMI_3prime_corrected` column
+- **Step 2 (protospacer_correction)**: Rescues near-miss protospacers
+  - Uses `method = 'nearest'` with allowed list
+  - Creates `protospacer_corrected` column
+  - Maps sequences like "AAAGGG" to "AAAGGT" if they're similar enough
+- Automatically uses temporary directories for intermediate results
+- Cleans up temp directories when complete
+
+This replaces the old two-command workflow (collapse + count with key-rescue) with a single streamlined command!
 
 ### Step 3: Count Unique Barcodes (count)
 
-Count unique barcodes per protospacer using config settings:
+Count unique barcodes per corrected protospacer using config settings:
 
 ```bash
 # Count barcodes for all samples using config
 outerspace count -c grnaquery.toml \
-    --input-dir results/collapse \
+    --input-dir results/collapsed \
     --output-dir results/count
 ```
 
-**Expected output**: CSV files with barcode counts per protospacer for each sample.
+**What this does**:
+- Counts unique `UMI_5prime_UMI_3prime_corrected` barcodes
+- Groups by `protospacer_corrected` (already rescued in Step 2)
+- No need for `--key-rescue` flag—correction already done!
+
+**Expected output**: CSV files with barcode counts per corrected protospacer for each sample.
 
 ### Step 4: Merge Results
 
@@ -229,170 +259,139 @@ outerspace stats -c grnaquery.toml \
     results/count/M2-lib.csv
 ```
 
-## Advanced Workflow: Using Allowed Lists
+## Understanding Iterative Collapse Steps
 
-For more stringent analysis, you can filter results to only include expected protospacers:
+The new `[[collapse.steps]]` feature allows you to chain multiple correction operations in a single command. This is more efficient and cleaner than the old workflow.
 
-### Step 3b: Count with Allowed List and Key Rescue
+### How Protospacer Rescue Works
 
-```bash
-# Count barcodes using only library protospacers and rescue near-miss keys
-outerspace count -c grnaquery.toml \
-    --input-dir results/collapse \
-    --output-dir results/count_filtered \
-    --allowed-list data/library_protospacers.txt \
-    --key-rescue --key-min-score -3 --key-match-score 0 \
-    --key-mismatch-penalty -1 --key-gap-penalty -2 \
-    --key-rescue-strategy 'all'
-```
+The second step uses **nearest-neighbor matching** with Needleman-Wunsch alignment:
 
-#### Key rescue uses NW alignment to find hits with mismatches
+1. **Exact matches** are kept as-is
+2. **Near-miss sequences** are aligned against the allowed list
+3. **Alignment scoring** uses match/mismatch/gap penalties
+4. **K-mer prescreening** speeds up the search by filtering candidates
 
-When `--key-rescue` is enabled, any protospacer which doesn't match an allowed protospacer will be matche d to the nearest one.
-With `--key-rescue-strategy 'all'`, all protospacers with the same minimum score will be attributed a fractional count.
-This can also be set to `first`, `last`, or `random`.
+**Example**: If the allowed list contains `AAAGGTCTTGCAGCTACGC` and a read has `AAAGTTCTTGCAGCTACGC` (one mismatch), it will be rescued with alignment score = `19*0 + 1*(-1) = -1` (using the tutorial's scoring: match=0, mismatch=-1).
 
-The n-wise global aligment search is a costly operation to perform on each read.
-In order to accelerate this process, an approximate matching method has been employed.
+### Tuning Protospacer Rescue Parameters
 
-#### Prescreening strategy for key rescue (k-mer approximate matching)
-
-- It precomputes sliding k-mers for every allowed key
-- For each query key, it computes its k-mers and only aligns against allowed keys that share at least a minimum number of k-mers
-- This radically reduces expensive alignments
-- Increasing min-overlap improves speed at the cost of increased false negatives
-
-You can tune the prescreen with these flags:
-
-- `--key-rescue-kmer-size`: k-mer length used for prescreening (default: 3)
-- `--key-rescue-min-overlap`: minimum shared k-mers required to attempt alignment (default: 1)
-- `--key-rescue-exhaustive`: disable prescreen and align against all allowed keys (slower)
-
-Examples:
-
-```bash
-# Stricter prescreen (fewer alignments)
-outerspace count -c grnaquery.toml \
-  --input-dir results/collapse \
-  --output-dir results/count_filtered \
-  --allowed-list data/library_protospacers.txt \
-  --key-rescue \
-  --key-rescue-kmer-size 4 \
-  --key-rescue-min-overlap 2
-```
-
-```bash
-# Exhaustive search (no prescreen)
-outerspace count -c grnaquery.toml \
-  --input-dir results/collapse \
-  --output-dir results/count_filtered \
-  --allowed-list data/library_protospacers.txt \
-  --key-rescue \
-  --key-rescue-exhaustive
-```
-
-In TOML configs, you can set:
+In your `[[collapse.steps]]` configuration:
 
 ```toml
-[count]
-key_rescue = true
-key_rescue_kmer_size = 3     # same as --key-rescue-kmer-size
-key_rescue_min_overlap = 8   # same as --key-rescue-min-overlap
+[[collapse.steps]]
+name = "protospacer_correction"
+columns = "protospacer"
+method = "nearest"
+allowed_list = "data/library_protospacers.txt"
+
+# Alignment scoring
+match_score = 0              # Score for matching bases
+mismatch_penalty = -1        # Penalty for mismatches
+gap_penalty = -2             # Penalty for insertions/deletions
+min_score = -3               # Minimum score to accept (allows ~3 mismatches or 1 indel + 1 mismatch)
+
+# K-mer prescreening (speeds up search)
+rescue_kmer_size = 3         # K-mer length for approximate matching
+rescue_min_overlap = 8       # Minimum shared k-mers required before alignment
+# rescue_exhaustive = true   # Uncomment to disable prescreen (slower but comprehensive)
+
+# Multi-match strategy
+rescue_strategy = "random"   # How to choose among tied matches: random, first, last
 ```
 
-Command-line flags override TOML values when both are provided. Use exhaustive mode from the CLI if you want to temporarily disable the prescreen for testing.
+### K-mer Prescreening Strategy
 
-**Notes**:
-- The `--allowed-list` parameter enables filtering to expected protospacers.
-- You can enable key rescue directly in the TOML (recommended for increasing the number of useful reads):
+The k-mer prescreen dramatically improves performance:
 
-```toml
-[count]
-allowed_list = 'data/library_protospacers.txt'
-key_rescue = true
-key_mismatch_penalty = -1
-key_gap_penalty = -3
-key_match_score = 1
-key_min_score = 17
-```
+- **Precomputes** k-mers for all allowed values
+- **Filters** candidates that share at least `rescue_min_overlap` k-mers
+- **Only aligns** against filtered candidates
+- **Trade-off**: Higher `min_overlap` = faster but may miss some rescues
 
-Command-line flags will override TOML values when provided.
-
-### Step 4b: Merge Filtered Results
-
-```bash
-mkdir -p results/count_filtered
-
-# Merge filtered results
-outerspace merge -c grnaquery.toml \
-    results/count_filtered/shuffle.csv \
-    results/count_filtered/M1-lib.csv \
-    results/count_filtered/M2-lib.csv \
-    --output-file results/merged_filtered_counts.csv \
-    --sample-names shuffle M1-lib M2-lib \
-    --format wide
-```
+Example: With `rescue_kmer_size = 3` and a sequence `AAAGGT`, the k-mers are: `AAA`, `AAG`, `AGG`, `GGT`. Only allowed sequences sharing ≥8 of these k-mers will be considered for alignment.
 
 ## Command-Line Overrides
 
 While configuration files are recommended for reproducible analyses, you can override specific settings via command-line parameters when needed for testing or one-off analyses.
 
-## Single File Processing
+## Single File Processing vs Batch Processing
 
-You can also process files individually instead of using directories:
+**Batch processing** (recommended):
+- Use `--input-dir` and `--output-dir` for iterative steps
+- Processes all CSV files in the directory
+- Required for `[[collapse.steps]]` mode
+
+**Single file processing**:
+- Use `--input-file` and `--output-file`
+- Not compatible with `[[collapse.steps]]`
+- Requires a config without steps defined, or use command-line args:
 
 ```bash
-# Process a single sample through the entire workflow
-outerspace findseq -c grnaquery.toml \
-    -1 data/409-4_S1_L002_R1_001.fastq.gz \
-    -2 data/409-4_S1_L002_R2_001.fastq.gz \
-    -o results/single_shuffle.csv
-
-outerspace collapse -c grnaquery.toml \
-    --input-file results/single_shuffle.csv \
-    --output-file results/single_shuffle_collapsed.csv
-
-outerspace count -c grnaquery.toml \
-    --input-file results/single_shuffle_collapsed.csv \
-    --output-file results/single_shuffle_counts.csv
+# Single file workflow (without iterative steps)
+outerspace collapse \
+    --input-file results/findseq/shuffle.csv \
+    --output-file results/umi_corrected.csv \
+    --columns UMI_5prime,UMI_3prime \
+    --mismatches 2 \
+    --method directional
 ```
+
+For the full iterative workflow, use batch mode with `[[collapse.steps]]` in your config.
 
 ## Understanding the Results
 
 ### findseq Output
 - Each row represents one sequencing read
-- Columns contain extracted sequences (UMI_5prime, protospacer, UMI_3prime)
+- Columns contain extracted sequences: `UMI_5prime`, `protospacer`, `UMI_3prime`
 - Only reads matching all patterns are included (due to `matches_only = true`)
 
-### collapse Output
-- Adds corrected barcode columns (e.g., `UMI_5prime_UMI_3prime_corrected`)
-- Groups similar barcodes to reduce sequencing errors
-- Preserves original barcode information
+### collapsed Output (Iterative Steps)
+The iterative collapse creates **two new corrected columns**:
+
+1. **`UMI_5prime_UMI_3prime_corrected`** (from Step 1)
+   - Clusters similar UMI barcodes using directional method
+   - Reduces sequencing errors in barcodes
+   - Example: `AAAACCCC` and `AAAACCCT` → `AAAACCCC`
+
+2. **`protospacer_corrected`** (from Step 2)
+   - Maps near-miss sequences to allowed list
+   - Uses Needleman-Wunsch alignment
+   - Example: `AAAGTTCTTGC...` → `AAAGGTCTTGC...` (rescued 1-mismatch variant)
+   - Empty if no rescue possible (score below threshold)
+
+Original columns (`UMI_5prime`, `UMI_3prime`, `protospacer`) are preserved for reference.
 
 ### count Output
-- Each row represents one unique protospacer
-- Shows count of unique barcodes per protospacer
+- Each row represents one unique **corrected** protospacer
+- Shows count of unique barcodes per `protospacer_corrected`
 - Higher counts indicate more cells with that gRNA
+- Only includes successfully rescued/matched protospacers
 
 ### merge Output
-- **Wide format**: One row per protospacer, one column per sample
+- **Wide format**: One row per corrected protospacer, one column per sample
 - **Long format**: One row per protospacer-sample combination
 
 ## Quality Control
 
 Monitor these metrics throughout the analysis:
 1. **Extraction efficiency**: Percentage of reads with all patterns found
-2. **Barcode diversity**: Number of unique barcodes per protospacer
-3. **Library representation**: Coverage of expected protospacers
-4. **Barcode correction**: Reduction in unique barcodes after clustering
+2. **UMI correction**: Reduction in unique barcodes after Step 1 clustering
+3. **Protospacer rescue rate**: Percentage of reads with rescued protospacers (Step 2)
+4. **Library representation**: Coverage of expected protospacers in allowed list
+5. **Barcode diversity**: Number of unique barcodes per corrected protospacer
+
+The collapse command logs rescue statistics for Step 2, showing how many values were mapped to the allowed list.
 
 ## Best Practices
 
-1. **Use configuration files** for reproducible analyses
-2. **Version control your config files** to track parameter changes
-3. **Test with small datasets** before processing large files
-4. **Document parameter choices** in your analysis notebooks
-5. **Validate patterns** with a subset of data before full processing
+1. **Use `[[collapse.steps]]`** for multi-stage correction pipelines
+2. **Use configuration files** for reproducible analyses
+3. **Version control your config files** to track parameter changes
+4. **Test rescue parameters** with small datasets to optimize `min_score` and k-mer settings
+5. **Monitor rescue rates** to ensure appropriate protospacer recovery
+6. **Document parameter choices** in your analysis notebooks
+7. **Validate patterns** with a subset of data before full processing
 
 ## Next Steps
 
@@ -405,9 +404,24 @@ After completing this tutorial, you can:
 ## Troubleshooting
 
 **Low extraction rates**: Check pattern configurations in `grnaquery.toml`
-**High barcode diversity**: Consider adjusting mismatch tolerance in collapse step
-**Missing protospacers**: Verify allowed list contains expected sequences
+
+**High barcode diversity**: Consider adjusting mismatch tolerance in UMI correction step
+
+**Low protospacer rescue rate**: 
+- Check alignment scoring parameters (`min_score` may be too stringent)
+- Verify allowed list contains expected sequences
+- Try `rescue_exhaustive = true` to disable k-mer prescreen
+- Lower `rescue_min_overlap` for more candidates
+
+**Too many rescued protospacers** (potential false positives):
+- Increase `min_score` threshold
+- Increase `rescue_min_overlap` for stricter k-mer filtering
+- Review alignment parameters
+
 **Memory issues**: Process samples individually or use row limits for testing
+
+**Steps mode not working**: Ensure you use `--input-dir` and `--output-dir` (not `--input-file`)
+
 **Parameter conflicts**: Command-line arguments always override config file settings
 
 

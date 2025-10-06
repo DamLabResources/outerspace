@@ -12,7 +12,7 @@ echo ""
 
 # Create output directories
 echo "Creating output directories..."
-mkdir -p results/findseq results/collapse results/count results/count_filtered
+mkdir -p results/findseq results/collapsed results/count
 
 echo ""
 echo "=== Step 1: Extract Sequences (findseq) ==="
@@ -39,32 +39,25 @@ outerspace findseq -c grnaquery.toml \
     -o results/findseq/M2-lib.csv
 
 echo ""
-echo "=== Step 2: Correct Barcodes (collapse) ==="
+echo "=== Step 2: Iterative Collapse (UMI + Protospacer Correction) ==="
 
-# Correct barcodes for all samples using config
-echo "Correcting barcodes for all samples using configuration file..."
+# Perform iterative collapse using steps defined in config
+echo "Running iterative collapse (2 steps):"
+echo "  Step 1: UMI correction using directional clustering"
+echo "  Step 2: Protospacer correction using nearest-neighbor matching"
 outerspace collapse -c grnaquery.toml \
     --input-dir results/findseq \
-    --output-dir results/collapse
+    --output-dir results/collapsed
 
 echo ""
 echo "=== Step 3: Count Unique Barcodes (count) ==="
 
 # Count barcodes for all samples using config
+# Note: Protospacer correction was already done in Step 2
 echo "Counting barcodes for all samples using configuration file..."
 outerspace count -c grnaquery.toml \
-    --input-dir results/collapse \
+    --input-dir results/collapsed \
     --output-dir results/count
-
-echo ""
-echo "=== Step 3b: Count with Allowed List ==="
-
-# Count barcodes using only library protospacers (with config + override)
-echo "Counting barcodes with allowed list filter (config + command-line override)..."
-outerspace count -c grnaquery.toml \
-    --input-dir results/collapse \
-    --output-dir results/count_filtered \
-    --allowed-list data/library_protospacers.txt
 
 echo ""
 echo "=== Step 4: Merge Results ==="
@@ -89,16 +82,6 @@ outerspace merge -c grnaquery.toml \
     --sample-names shuffle M1-lib M2-lib \
     --format long
 
-# Merge filtered results using config
-echo "Merging filtered results using configuration file..."
-outerspace merge -c grnaquery.toml \
-    results/count_filtered/shuffle.csv \
-    results/count_filtered/M1-lib.csv \
-    results/count_filtered/M2-lib.csv \
-    --output-file results/merged_filtered_counts.csv \
-    --sample-names shuffle M1-lib M2-lib \
-    --format wide
-
 echo ""
 echo "=== Step 5: Generate Statistics ==="
 
@@ -110,39 +93,26 @@ outerspace stats -c grnaquery.toml \
     results/count/M2-lib.csv
 
 echo ""
-echo "=== Demonstrating Command-Line Overrides ==="
-
-# Show how to override config parameters
-echo "Demonstrating parameter override: using stricter mismatch tolerance..."
-mkdir -p results/collapse_strict
-
-outerspace collapse -c grnaquery.toml \
-    --input-dir results/findseq \
-    --output-dir results/collapse_strict \
-    --mismatches 1 \
-    --method cluster
-
-echo "Override complete - results saved to results/collapse_strict/"
-
-echo ""
 echo "=== Tutorial Complete! ==="
 echo ""
-echo "This tutorial demonstrated the configuration file approach with:"
+echo "This tutorial demonstrated the iterative collapse workflow with:"
+echo "  ✓ Multi-step correction pipeline defined in config file"
+echo "  ✓ Automatic UMI correction followed by protospacer rescue"
 echo "  ✓ Consistent parameter usage across all commands"
 echo "  ✓ Easy reproducibility with version-controlled config files"
-echo "  ✓ Command-line overrides for testing and customization"
 echo ""
 echo "Results have been saved to the 'results/' directory:"
 echo "  - results/findseq/: Extracted sequences"
-echo "  - results/collapse/: Barcode-corrected files (config approach)"
-echo "  - results/collapse_strict/: Barcode-corrected files (with override)"
-echo "  - results/count/: Barcode counts per protospacer"
-echo "  - results/count_filtered/: Filtered barcode counts"
+echo "  - results/collapsed/: Iteratively corrected files (UMI + protospacer)"
+echo "    ├─ UMI_5prime_UMI_3prime_corrected: Clustered UMI barcodes"
+echo "    └─ protospacer_corrected: Rescued protospacer sequences"
+echo "  - results/count/: Barcode counts per corrected protospacer"
 echo "  - results/merged_*.csv: Merged results across samples"
 echo ""
 echo "Key takeaways:"
+echo "  • [[collapse.steps]] enables iterative multi-stage correction"
+echo "  • Combines UMI clustering + nearest-neighbor rescue in one command"
 echo "  • Configuration files ensure consistency and reproducibility"
-echo "  • Command-line parameters can override config settings when needed"
 echo "  • Version control your config files for better analysis tracking"
 echo ""
 echo "You can now explore the results and run additional analyses." 

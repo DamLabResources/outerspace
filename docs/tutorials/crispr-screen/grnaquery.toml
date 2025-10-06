@@ -30,41 +30,39 @@ pattern_names = ["UMI_5prime", "protospacer", "UMI_3prime"]
 # Alternative: use_all_patterns = true
 matches_only = true
 
-[collapse]
-columns = 'UMI_5prime,UMI_3prime'
+# Iterative collapse steps (recommended approach)
+[[collapse.steps]]
+name = "umi_correction"
+columns = "UMI_5prime,UMI_3prime"
+method = "directional"
 mismatches = 2
-method = 'directional'
+
+[[collapse.steps]]
+name = "protospacer_correction"
+columns = "protospacer"
+method = "nearest"
+allowed_list = "data/library_protospacers.txt"
+mismatch_penalty = -1
+gap_penalty = -2
+match_score = 0
+min_score = -3
+rescue_strategy = "random"
+rescue_kmer_size = 3
+rescue_min_overlap = 8
 
 [count]
 barcode_column = 'UMI_5prime_UMI_3prime_corrected'
-key_column = 'protospacer'
-allowed_list = 'data/library_protospacers.txt'
-
-# Use key rescue
-key_rescue = true
-
-# Alignment Parameters
-key_mismatch_penalty = -1
-key_gap_penalty = -2
-key_match_score = 0
-# Up to 3 mm or 1 indel 1 mm
-key_min_score = -3
-
-key_rescue_strategy = 'random'
-
-# Approximate matching
-key_rescue_kmer_size = 3
-key_rescue_min_overlap = 8
+key_column = 'protospacer_corrected'
 
 [gini]
 column = 'UMI_5prime_UMI_3prime_corrected_count'
 
 [merge]
 column = 'UMI_5prime_UMI_3prime_corrected_count'
-key_column = 'protospacer'
+key_column = 'protospacer_corrected'
 
 [stats]
-key_column = 'protospacer'
+key_column = 'protospacer_corrected'
 count_column = 'UMI_5prime_UMI_3prime_corrected_count'
 
 [owner]
