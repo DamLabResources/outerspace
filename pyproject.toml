@@ -36,3 +36,33 @@ packages = [
     "outerspace.cli.utils",
     "outerspace.stats"
 ] 
+
+[tool.setuptools.data-files]
+"outerspace/workflow" = [
+    "workflow/Snakefile"
+]
+"outerspace/workflow/wrappers/findseq" = [
+    "workflow/wrappers/findseq/wrapper.py",
+    "workflow/wrappers/findseq/environment.yaml",
+    "workflow/wrappers/findseq/README.md"
+]
+"outerspace/workflow/wrappers/collapse" = [
+    "workflow/wrappers/collapse/wrapper.py",
+    "workflow/wrappers/collapse/environment.yaml",
+    "workflow/wrappers/collapse/README.md"
+]
+"outerspace/workflow/wrappers/count" = [
+    "workflow/wrappers/count/wrapper.py",
+    "workflow/wrappers/count/environment.yaml",
+    "workflow/wrappers/count/README.md"
+]
+"outerspace/workflow/wrappers/merge" = [
+    "workflow/wrappers/merge/wrapper.py",
+    "workflow/wrappers/merge/environment.yaml",
+    "workflow/wrappers/merge/README.md"
+]
+"outerspace/workflow/wrappers/stats" = [
+    "workflow/wrappers/stats/wrapper.py",
+    "workflow/wrappers/stats/environment.yaml",
+    "workflow/wrappers/stats/README.md"
+]
