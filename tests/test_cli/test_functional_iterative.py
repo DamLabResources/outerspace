@@ -285,13 +285,13 @@ def test_full_workflow_with_key_rescue(temp_workspace):
         cli = Cli(findseq_args)
         cli.run()
 
-    # Step 2: Run collapse command
-    collapse_args = [
+    # Step 2a: Run collapse command for UMI correction
+    collapse_umi_args = [
         "collapse",
         "--input-dir",
         os.path.join(temp_workspace, "findseq"),
         "--output-dir",
-        os.path.join(temp_workspace, "collapse"),
+        os.path.join(temp_workspace, "collapse_UMI"),
         "--columns",
         "UMI_5prime,UMI_3prime",
         "--mismatches",
@@ -299,28 +299,42 @@ def test_full_workflow_with_key_rescue(temp_workspace):
         "--method",
         "directional",
     ]
-    cli = Cli(collapse_args)
+    cli = Cli(collapse_umi_args)
     cli.run()
 
-    # Step 3: Run count command with allowed list and key rescue
+    # Step 2b: Run collapse command again for protospacer correction with nearest method
+    collapse_proto_args = [
+        "collapse",
+        "--input-dir",
+        os.path.join(temp_workspace, "collapse_UMI"),
+        "--output-dir",
+        os.path.join(temp_workspace, "collapse_proto"),
+        "--columns",
+        "protospacer",
+        "--allowed-list",
+        os.path.join(temp_workspace, "library_protospacers.txt"),
+        "--method", "nearest",
+        "--mismatch-penalty", "-1",
+        "--gap-penalty", "-3",
+        "--match-score", "1",
+        "--min-score", "0",
+        "--rescue-kmer-size", "3",
+        "--rescue-min-overlap", "8",
+    ]
+    cli = Cli(collapse_proto_args)
+    cli.run()
+
+    # Step 3: Run count command
     count_args = [
         "count",
         "--input-dir",
-        os.path.join(temp_workspace, "collapse"),
+        os.path.join(temp_workspace, "collapse_proto"),
         "--output-dir",
         os.path.join(temp_workspace, "count"),
         "--barcode-column",
         "UMI_5prime_UMI_3prime_corrected",
         "--key-column",
-        "protospacer",
-        "--allowed-list",
-        os.path.join(temp_workspace, "library_protospacers.txt"),
-        "--key-rescue",
-        "--key-rescue-exhaustive",
-        "--key-mismatch-penalty", "-1",
-        "--key-gap-penalty", "-3",
-        "--key-match-score", "1",
-        "--key-min-score", "2",
+        "protospacer_corrected",
     ]
     cli = Cli(count_args)
     cli.run()
@@ -329,7 +343,7 @@ def test_full_workflow_with_key_rescue(temp_workspace):
     for output_name in ["shuffle", "M1-lib", "M2-lib"]:
         assert os.path.exists(os.path.join(temp_workspace, f"count/{output_name}.csv"))
 
-    # Step 4: Run merge command
+    # Step 4: Run merge command (using corrected key column)
     merge_args = [
         "merge",
         os.path.join(temp_workspace, "count/shuffle.csv"),
@@ -338,7 +352,7 @@ def test_full_workflow_with_key_rescue(temp_workspace):
         "--output-file",
         os.path.join(temp_workspace, "merged_counts.csv"),
         "--key-column",
-        "protospacer",
+        "protospacer_corrected",
         "--count-column",
         "UMI_5prime_UMI_3prime_corrected_count",
         "--sample-names",
@@ -353,14 +367,14 @@ def test_full_workflow_with_key_rescue(temp_workspace):
 
     assert os.path.exists(os.path.join(temp_workspace, "merged_counts.csv"))
 
-    # Step 5: Run stats command
+    # Step 5: Run stats command (using corrected key column)
     stats_args = [
         "stats",
         os.path.join(temp_workspace, "count/shuffle.csv"),
         os.path.join(temp_workspace, "count/M1-lib.csv"),
         os.path.join(temp_workspace, "count/M2-lib.csv"),
         "--key-column",
-        "protospacer",
+        "protospacer_corrected",
         "--count-column",
         "UMI_5prime_UMI_3prime_corrected_count",
     ]
@@ -547,58 +561,77 @@ def test_workflow_with_config(temp_workspace):
     cli.run()
 
     
-# New: key-rescue functional test using a synthetic collapse file
-def test_count_key_rescue_synthetic(temp_workspace):
-    """Count should rescue near-miss keys to allowed keys with --key-rescue"""
-    # Prepare synthetic collapse directory and file
-    collapse_dir = os.path.join(temp_workspace, "collapse_rescue")
-    os.makedirs(collapse_dir, exist_ok=True)
-    collapse_file = os.path.join(collapse_dir, "synthetic.csv")
+# New: key-rescue functional test using iterative collapse
+def test_collapse_key_rescue_synthetic(temp_workspace):
+    """Collapse should rescue near-miss keys with method=nearest (iterative approach)"""
+    # Step 1: Prepare synthetic findseq file
+    findseq_file = os.path.join(temp_workspace, "findseq_rescue.csv")
+    with open(findseq_file, "w") as f:
+        f.write("protospacer,UMI_5prime,UMI_3prime\n")
+        f.write("key1,AAA,CCC\n")
+        f.write("key1,AAT,CCC\n")
+        f.write("kay1,GGG,TTT\n")  # 1 mismatch from key1
 
-    with open(collapse_file, "w") as f:
-        f.write("protospacer,UMI_5prime_UMI_3prime_corrected\n")
-        f.write("key1,bar1\n")
-        f.write("key1,bar2\n")
-        f.write("kay1,bar3\n")  # 1 mismatch from key1
+    # Step 2: First collapse for UMI correction
+    umi_collapse_file = os.path.join(temp_workspace, "umi_collapse_rescue.csv")
+    args = [
+        "collapse",
+        "--input-file",
+        findseq_file,
+        "--output-file",
+        umi_collapse_file,
+        "--columns",
+        "UMI_5prime,UMI_3prime",
+        "--mismatches",
+        "1",
+        "--method",
+        "directional",
+    ]
+    cli = Cli(args)
+    cli.run()
 
-    # Allowed list containing only key1
+    # Step 3: Second collapse for protospacer correction with nearest method
     allowed_list = os.path.join(temp_workspace, "allowed_keys.txt")
     with open(allowed_list, "w") as f:
         f.write("key1\n")
 
-    # Run count with key rescue enabled
-    output_file = os.path.join(temp_workspace, "count_rescue.csv")
+    proto_collapse_file = os.path.join(temp_workspace, "proto_collapse_rescue.csv")
     args = [
-        "count",
+        "collapse",
         "--input-file",
-        collapse_file,
+        umi_collapse_file,
         "--output-file",
-        output_file,
-        "--barcode-column",
-        "UMI_5prime_UMI_3prime_corrected",
-        "--key-column",
+        proto_collapse_file,
+        "--columns",
         "protospacer",
         "--allowed-list",
         allowed_list,
-        "--key-rescue",
-        "--key-rescue-exhaustive",
-        "--key-mismatch-penalty",
+        "--rescue-exhaustive",
+        "--mismatch-penalty",
         "-1",
-        "--key-gap-penalty",
+        "--gap-penalty",
         "-3",
-        "--key-match-score",
+        "--match-score",
         "1",
-        "--key-min-score",
-        "2",
+        "--min-score",
+        "0",
+        "--method",
+        "nearest",
     ]
     cli = Cli(args)
     cli.run()
 
     # Verify rescued result
-    assert os.path.exists(output_file)
-    with open(output_file, "r") as f:
+    assert os.path.exists(proto_collapse_file)
+    with open(proto_collapse_file, "r") as f:
         content = f.read()
-        assert "key1,3" in content  # kay1 rescued to key1
-        assert "kay1" not in content
+        # Should have protospacer_corrected column
+        assert "protospacer_corrected" in content
+        # kay1 should be rescued to key1 in the corrected column
+        lines = content.strip().split("\n")
+        for line in lines[1:]:  # Skip header
+            if "kay1" in line:
+                # Check that corrected column has key1
+                assert "key1" in line
 
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

@@ -9,14 +9,16 @@ import csv
 import glob
 import logging
 import os
+import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from argparse import ArgumentParser
 
 from tqdm import tqdm
 
 from outerspace.cli.commands.base import BaseCommand
 from outerspace.umi import UMI
+from outerspace.nearest import NearestUMIFinder
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -81,11 +83,83 @@ class CollapseCommand(BaseCommand):
         )
         parser.add_argument(
             "--method",
-            choices=["cluster", "adjacency", "directional"],
+            choices=["cluster", "adjacency", "directional", "allowed", "nearest"],
             default="directional",
-            help="Clustering method to use (default: directional)",
+            help=(
+                "Correction method: 'cluster', 'adjacency', 'directional' for UMI clustering; "
+                "'allowed' for exact matching with --allowed-list; "
+                "'nearest' for nearest-neighbor rescue with --allowed-list (default: directional)"
+            ),
         )
         parser.add_argument("--metrics", help="Output YAML file for metrics")
+        
+        # Allowed list options (required for method='allowed' or 'nearest')
+        parser.add_argument(
+            "--allowed-list",
+            help=(
+                "Text file containing allowed values for --columns (one per line). "
+                "Required for --method allowed or --method nearest."
+            ),
+            default=None,
+        )
+        # Alignment scoring parameters (for use with --method nearest)
+        parser.add_argument(
+            "--min-score",
+            type=int,
+            default=0,
+            help="Minimum alignment score required to rescue a value (default: 0). For use with --method nearest.",
+        )
+        parser.add_argument(
+            "--match-score",
+            type=int,
+            default=1,
+            help="Score for matches when aligning (default: 1). For use with --method nearest.",
+        )
+        parser.add_argument(
+            "--mismatch-penalty",
+            type=int,
+            default=-1,
+            help="Penalty for mismatches when aligning (default: -1). For use with --method nearest.",
+        )
+        parser.add_argument(
+            "--gap-penalty",
+            type=int,
+            default=-3,
+            help="Penalty for gaps/indels when aligning (default: -3). For use with --method nearest.",
+        )
+        
+        # K-mer prescreen parameters (for use with --method nearest)
+        parser.add_argument(
+            "--rescue-kmer-size",
+            type=int,
+            default=3,
+            help="K-mer size for approximate prescreen (default: 3). For use with --method nearest.",
+        )
+        parser.add_argument(
+            "--rescue-min-overlap",
+            type=int,
+            default=1,
+            help=(
+                "Minimum number of shared k-mers required before alignment "
+                "(default: 1). For use with --method nearest."
+            ),
+        )
+        parser.add_argument(
+            "--rescue-exhaustive",
+            action="store_true",
+            default=False,
+            help=(
+                "Disable k-mer prescreen and align against all allowed values "
+                "(slower, exhaustive search). For use with --method nearest."
+            ),
+        )
+        parser.add_argument(
+            "--rescue-strategy",
+            type=str,
+            default="random",
+            help="Strategy to choose the best match when multiple are found (default: random). For use with --method nearest.",
+        )
+        
         self._add_common_args(parser)
 
     def _parse_columns(self, columns_str: str) -> List[str]:
@@ -103,6 +177,34 @@ class CollapseCommand(BaseCommand):
         """
         return [col.strip() for col in columns_str.split(",")]
 
+    def _read_allowed_keys(self, filepath: str) -> Tuple[str, ...]:
+        """Read allowed keys from a text file.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to text file containing allowed keys
+
+        Returns
+        -------
+        Tuple[str, ...]
+            Allowed keys in file order (unique, empties filtered)
+        """
+        allowed_keys_list = []
+        seen: Set[str] = set()
+        try:
+            with open(filepath, "r") as f:
+                for line in f:
+                    key = line.strip()
+                    if key and key not in seen:
+                        seen.add(key)
+                        allowed_keys_list.append(key)
+            logger.info(f"Loaded {len(allowed_keys_list)} allowed keys from {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to read allowed keys from {filepath}: {e}")
+            raise
+        return tuple(allowed_keys_list)
+
     def _process_single_file(
         self,
         input_file: str,
@@ -112,11 +214,18 @@ class CollapseCommand(BaseCommand):
         sep: str,
         row_limit: Optional[int],
         method: str,
+        allowed_keys_ordered: Optional[Tuple[str, ...]] = None,
+        mismatch_penalty: Optional[int] = None,
+        gap_penalty: Optional[int] = None,
+        match_score: Optional[int] = None,
+        min_score: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Process a single CSV file and return metrics.
 
-        This method reads a CSV file, performs barcode correction using UMI clustering,
-        and writes the corrected data to an output file.
+        This method reads a CSV file, performs correction using either UMI clustering
+        (for methods: cluster, adjacency, directional), exact matching (for method: allowed),
+        or nearest-neighbor matching (for method: nearest). It writes the corrected data
+        to an output file.
 
         Parameters
         ----------
@@ -125,15 +234,27 @@ class CollapseCommand(BaseCommand):
         output_file : str
             Path to output CSV file
         columns : List[str]
-            List of column names containing barcodes
+            List of column names to correct
         mismatches : int
-            Number of mismatches allowed for clustering
+            Number of mismatches allowed for UMI clustering (not used for method='allowed' or 'nearest')
         sep : str
             CSV separator character
         row_limit : Optional[int]
             Maximum number of rows to process (for testing)
         method : str
-            Clustering method to use
+            Correction method: 'cluster', 'adjacency', 'directional' for UMI clustering,
+            'allowed' for exact matching with allowed list, or 'nearest' for nearest-neighbor
+            matching with allowed list
+        allowed_keys_ordered : Optional[Tuple[str, ...]], default=None
+            Allowed values in file order (required for method='allowed' or 'nearest')
+        mismatch_penalty : Optional[int], default=None
+            Mismatch penalty for nearest-neighbor alignment
+        gap_penalty : Optional[int], default=None
+            Gap penalty for nearest-neighbor alignment
+        match_score : Optional[int], default=None
+            Match score for nearest-neighbor alignment
+        min_score : Optional[int], default=None
+            Minimum score threshold to accept a match
 
         Returns
         -------
@@ -168,76 +289,158 @@ class CollapseCommand(BaseCommand):
         if row_limit:
             logger.info(f"Processing first {row_limit} rows of {input_file}")
 
-        # Create UMI object and process barcodes
-        umi = UMI(mismatches=mismatches, method=method)
+        # Determine corrected column name
+        corrected_col_name = "_".join(columns) + "_corrected"
 
-        # Add barcodes to UMI object
-        for row in rows:
-            # Join multiple columns if specified
+        # Process based on method
+        if method in ["allowed", "nearest"]:
+            # Use allowed list matching (exact for 'allowed', nearest-neighbor for 'nearest')
+            if allowed_keys_ordered is None or len(allowed_keys_ordered) == 0:
+                raise ValueError(f"Method '{method}' requires a non-empty --allowed-list")
+            
             if len(columns) > 1:
-                # Check if all columns are present
-                if all(row.get(col, "") for col in columns):
-                    combined_bc = "".join(str(row[col]) for col in columns)
-                    umi.consume(combined_bc)
-                    # TODO: maybe there is a way to do "composite" umis
+                raise ValueError(f"Method '{method}' currently only supports single column correction")
+            
+            column = columns[0]
+            allowed_keys_set = set(allowed_keys_ordered)
+            rescued_count = 0
+            multiple_rescued_count = 0
+            
+            # Prepare nearest finder for 'nearest' method
+            finder = None
+            if method == "nearest":
+                finder = NearestUMIFinder(
+                    allowed_list=allowed_keys_ordered,
+                    mismatch_penalty=mismatch_penalty if mismatch_penalty is not None else -1,
+                    gap_penalty=gap_penalty if gap_penalty is not None else -3,
+                    match_score=match_score if match_score is not None else 1,
+                    min_score=min_score if min_score is not None else 0,
+                    use_prescreen=not self.args.rescue_exhaustive,
+                    kmer_size=self.args.rescue_kmer_size,
+                    min_kmer_overlap=self.args.rescue_min_overlap,
+                )
+            
+            corrected_rows = []
+            desc = "Exact matching with allowed list" if method == "allowed" else "Nearest-neighbor matching"
+            for row in tqdm(rows, desc=desc):
+                corrected_row = row.copy()
+                value = str(row.get(column, ""))
+                
+                if not value:
+                    corrected_row[corrected_col_name] = ""
+                elif value in allowed_keys_set:
+                    # Exact match
+                    corrected_row[corrected_col_name] = value
+                elif method == "nearest" and finder:
+                    # Attempt rescue with nearest-neighbor matching
+                    mapped_values = finder.find(value)
+                    if mapped_values:
+                        if len(mapped_values) == 1:
+                            corrected_row[corrected_col_name] = mapped_values[0]
+                            rescued_count += 1
+                        else:
+                            multiple_rescued_count += 1
+                            # Use strategy to choose one
+                            if self.args.rescue_strategy == "random":
+                                corrected_row[corrected_col_name] = random.choice(mapped_values)
+                            elif self.args.rescue_strategy == "first":
+                                corrected_row[corrected_col_name] = mapped_values[0]
+                            elif self.args.rescue_strategy == "last":
+                                corrected_row[corrected_col_name] = mapped_values[-1]
+                            else:
+                                corrected_row[corrected_col_name] = mapped_values[0]
+                            rescued_count += 1
+                    else:
+                        # No rescue found, set to empty
+                        corrected_row[corrected_col_name] = ""
                 else:
-                    logger.info(f"Skipping row with missing columns: {row}")
-            else:
-                combined_bc = str(row[columns[0]])
-                if combined_bc:  # Skip empty values
-                    umi.consume(combined_bc)
+                    # method=='allowed' and not in allowed list, set to empty
+                    corrected_row[corrected_col_name] = ""
+                
+                corrected_rows.append(corrected_row)
+            
+            if method == "nearest":
+                logger.info(f"Values rescued (mapped to allowed list): {rescued_count}")
+                logger.info(f"Values rescued with multiple matches: {multiple_rescued_count}")
+            
+            # Generate metrics
+            unique_before = len(set(str(row.get(column, "")) for row in rows if row.get(column, "")))
+            unique_after = len(set(row[corrected_col_name] for row in corrected_rows if row[corrected_col_name]))
+            
+            metrics = {
+                "correction_stats": {
+                    "unique_values_before": unique_before,
+                    "unique_values_after": unique_after,
+                    "values_rescued": rescued_count if method == "nearest" else 0,
+                },
+            }
+            
+        else:
+            # Use UMI clustering (cluster, adjacency, directional)
+            umi = UMI(mismatches=mismatches, method=method)
 
-        # Create mapping
-        logger.info(
-            f"Creating clusters from {len(umi._counts)} unique barcodes from {len(rows)} rows "
-            f"with {mismatches} mismatches using {method} method"
-        )
-        umi.create_mapping()
+            # Add barcodes to UMI object
+            for row in rows:
+                # Join multiple columns if specified
+                if len(columns) > 1:
+                    # Check if all columns are present
+                    if all(row.get(col, "") for col in columns):
+                        combined_bc = "".join(str(row[col]) for col in columns)
+                        umi.consume(combined_bc)
+                    else:
+                        logger.debug(f"Skipping row with missing columns: {row}")
+                else:
+                    combined_bc = str(row[columns[0]])
+                    if combined_bc:  # Skip empty values
+                        umi.consume(combined_bc)
 
-        # Correct barcodes in rows
-        corrected_rows = []
-        key = "_".join(columns) + "_corrected"
+            # Create mapping
+            logger.info(
+                f"Creating clusters from {len(umi._counts)} unique barcodes from {len(rows)} rows "
+                f"with {mismatches} mismatches using {method} method"
+            )
+            umi.create_mapping()
 
-        for row in tqdm(rows, desc="Correcting barcodes"):
-            corrected_row = row.copy()
+            # Correct barcodes in rows
+            corrected_rows = []
+            for row in tqdm(rows, desc="Correcting barcodes"):
+                corrected_row = row.copy()
 
-            # Join multiple columns if specified
-            if len(columns) > 1:
-                combined_bc = "".join(str(row[col]) for col in columns)
-            else:
-                combined_bc = str(row[columns[0]])
+                # Join multiple columns if specified
+                if len(columns) > 1:
+                    combined_bc = "".join(str(row[col]) for col in columns)
+                else:
+                    combined_bc = str(row[columns[0]])
 
-            # Create corrected column
-            if combined_bc:
-                try:
-                    corrected = umi[combined_bc]
-                    corrected_row[key] = corrected.decode("ascii")
-                except KeyError:
-                    corrected_row[key] = combined_bc
-            else:
-                corrected_row[key] = ""
+                # Create corrected column
+                if combined_bc:
+                    try:
+                        corrected = umi[combined_bc]
+                        corrected_row[corrected_col_name] = corrected.decode("ascii")
+                    except KeyError:
+                        corrected_row[corrected_col_name] = combined_bc
+                else:
+                    corrected_row[corrected_col_name] = ""
 
-            corrected_rows.append(corrected_row)
+                corrected_rows.append(corrected_row)
 
-        # Generate metrics
-        metrics = {
-            "barcode_counts": {
-                "unique_barcodes_before": len(umi._counts),
-                "unique_barcodes_after": len(umi.corrected_counts),
-                "total_reads": sum(umi._counts.values()),
-            },
-            "correction_details": {
-                "clusters_formed": len(set(umi._mapping.values())),
-                "barcodes_corrected": len(umi._mapping) - len(umi.corrected_counts),
-            },
-        }
+            # Generate metrics for UMI clustering
+            metrics = {
+                "barcode_counts": {
+                    "unique_barcodes_before": len(umi._counts),
+                    "unique_barcodes_after": len(umi.corrected_counts),
+                    "total_reads": sum(umi._counts.values()),
+                },
+                "correction_details": {
+                    "clusters_formed": len(set(umi._mapping.values())),
+                    "barcodes_corrected": len(umi._mapping) - len(umi.corrected_counts),
+                },
+            }
 
         # Write output
         self._write_csv(corrected_rows, output_file, sep)
 
-        logger.info(
-            f"Processed {len(rows)} rows, corrected {metrics['correction_details']['barcodes_corrected']} barcodes"
-        )
+        logger.info(f"Processed {len(rows)} rows using {method} method")
         return metrics
 
     def _write_csv(self, rows: List[Dict[str, str]], filepath: str, sep: str) -> None:
@@ -314,6 +517,15 @@ class CollapseCommand(BaseCommand):
         # Parse columns argument
         columns = self._parse_columns(self.args.columns) if self.args.columns else []
 
+        # Read allowed keys if specified
+        allowed_keys: Optional[Tuple[str, ...]] = None
+        if self.args.allowed_list:
+            allowed_keys = self._read_allowed_keys(self.args.allowed_list)
+        
+        # Validate parameters for method='allowed' or 'nearest'
+        if self.args.method in ["allowed", "nearest"] and not self.args.allowed_list:
+            raise ValueError(f"Method '{self.args.method}' requires --allowed-list to be specified")
+
         # Validate input/output arguments
         if not self.args.input_file and not self.args.input_dir:
             raise ValueError("Please provide either --input-file or --input-dir")
@@ -344,6 +556,11 @@ class CollapseCommand(BaseCommand):
                     self.args.sep,
                     self.args.row_limit,
                     self.args.method,
+                    allowed_keys_ordered=allowed_keys,
+                    mismatch_penalty=self.args.mismatch_penalty,
+                    gap_penalty=self.args.gap_penalty,
+                    match_score=self.args.match_score,
+                    min_score=self.args.min_score,
                 )
 
                 # Print metrics
@@ -403,6 +620,11 @@ class CollapseCommand(BaseCommand):
                     self.args.sep,
                     self.args.row_limit,
                     self.args.method,
+                    allowed_keys_ordered=allowed_keys,
+                    mismatch_penalty=self.args.mismatch_penalty,
+                    gap_penalty=self.args.gap_penalty,
+                    match_score=self.args.match_score,
+                    min_score=self.args.min_score,
                 )
 
                 # Store metrics for this file
