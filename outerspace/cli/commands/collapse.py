@@ -10,6 +10,8 @@ import glob
 import logging
 import os
 import random
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from argparse import ArgumentParser
@@ -219,6 +221,10 @@ class CollapseCommand(BaseCommand):
         gap_penalty: Optional[int] = None,
         match_score: Optional[int] = None,
         min_score: Optional[int] = None,
+        rescue_exhaustive: Optional[bool] = None,
+        rescue_kmer_size: Optional[int] = None,
+        rescue_min_overlap: Optional[int] = None,
+        rescue_strategy: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process a single CSV file and return metrics.
 
@@ -255,6 +261,14 @@ class CollapseCommand(BaseCommand):
             Match score for nearest-neighbor alignment
         min_score : Optional[int], default=None
             Minimum score threshold to accept a match
+        rescue_exhaustive : Optional[bool], default=None
+            Whether to disable k-mer prescreen (exhaustive search)
+        rescue_kmer_size : Optional[int], default=None
+            K-mer size for prescreening
+        rescue_min_overlap : Optional[int], default=None
+            Minimum k-mer overlap for prescreening
+        rescue_strategy : Optional[str], default=None
+            Strategy for choosing among multiple matches
 
         Returns
         -------
@@ -315,9 +329,9 @@ class CollapseCommand(BaseCommand):
                     gap_penalty=gap_penalty if gap_penalty is not None else -3,
                     match_score=match_score if match_score is not None else 1,
                     min_score=min_score if min_score is not None else 0,
-                    use_prescreen=not self.args.rescue_exhaustive,
-                    kmer_size=self.args.rescue_kmer_size,
-                    min_kmer_overlap=self.args.rescue_min_overlap,
+                    use_prescreen=not (rescue_exhaustive if rescue_exhaustive is not None else False),
+                    kmer_size=rescue_kmer_size if rescue_kmer_size is not None else 3,
+                    min_kmer_overlap=rescue_min_overlap if rescue_min_overlap is not None else 1,
                 )
             
             corrected_rows = []
@@ -341,11 +355,12 @@ class CollapseCommand(BaseCommand):
                         else:
                             multiple_rescued_count += 1
                             # Use strategy to choose one
-                            if self.args.rescue_strategy == "random":
+                            strategy = rescue_strategy if rescue_strategy is not None else "random"
+                            if strategy == "random":
                                 corrected_row[corrected_col_name] = random.choice(mapped_values)
-                            elif self.args.rescue_strategy == "first":
+                            elif strategy == "first":
                                 corrected_row[corrected_col_name] = mapped_values[0]
-                            elif self.args.rescue_strategy == "last":
+                            elif strategy == "last":
                                 corrected_row[corrected_col_name] = mapped_values[-1]
                             else:
                                 corrected_row[corrected_col_name] = mapped_values[0]
@@ -483,6 +498,114 @@ class CollapseCommand(BaseCommand):
         with open(filepath, "w") as f:
             yaml.dump(metrics, f, default_flow_style=False)
 
+    def _execute_steps(
+        self,
+        steps: List[Dict[str, Any]],
+        input_dir: str,
+        output_dir: str,
+    ) -> None:
+        """Execute a series of collapse steps iteratively.
+        
+        Parameters
+        ----------
+        steps : List[Dict[str, Any]]
+            List of step configurations from the config file
+        input_dir : str
+            Initial input directory
+        output_dir : str
+            Final output directory
+        """
+        logger.info(f"Executing {len(steps)} collapse steps iteratively")
+        
+        temp_dirs = []
+        current_input = input_dir
+        
+        try:
+            for i, step in enumerate(steps):
+                step_num = i + 1
+                is_last_step = (step_num == len(steps))
+                
+                logger.info(f"=== Step {step_num}/{len(steps)}: {step.get('name', f'step_{step_num}')} ===")
+                
+                # Determine output directory
+                if is_last_step:
+                    current_output = output_dir
+                else:
+                    # Create temp directory for intermediate results
+                    temp_dir = tempfile.mkdtemp(prefix=f"collapse_step{step_num}_")
+                    temp_dirs.append(temp_dir)
+                    current_output = temp_dir
+                
+                # Extract step parameters
+                columns_str = step.get("columns")
+                if not columns_str:
+                    raise ValueError(f"Step {step_num}: 'columns' is required")
+                columns = self._parse_columns(columns_str)
+                
+                method = step.get("method", "directional")
+                mismatches = step.get("mismatches", 2)
+                sep = step.get("sep", ",")
+                
+                # Read allowed list if specified
+                allowed_keys: Optional[Tuple[str, ...]] = None
+                if "allowed_list" in step:
+                    allowed_list_path = step["allowed_list"]
+                    # Handle relative paths relative to config file
+                    if self.args.config and not os.path.isabs(allowed_list_path):
+                        config_dir = os.path.dirname(self.args.config)
+                        allowed_list_path = os.path.join(config_dir, allowed_list_path)
+                    allowed_keys = self._read_allowed_keys(allowed_list_path)
+                
+                # Validate method requirements
+                if method in ["allowed", "nearest"]:
+                    if not allowed_keys or len(allowed_keys) == 0:
+                        raise ValueError(f"Step {step_num}: Method '{method}' requires 'allowed_list'")
+                
+                # Create output directory
+                os.makedirs(current_output, exist_ok=True)
+                
+                # Get list of files to process
+                input_files = glob.glob(os.path.join(current_input, "*.csv"))
+                if not input_files:
+                    raise ValueError(f"Step {step_num}: No CSV files found in {current_input}")
+                
+                logger.info(f"Processing {len(input_files)} files: {current_input} → {current_output}")
+                
+                # Process each file
+                for input_file in tqdm(input_files, desc=f"Step {step_num}"):
+                    output_file = os.path.join(current_output, os.path.basename(input_file))
+                    
+                    self._process_single_file(
+                        input_file,
+                        output_file,
+                        columns,
+                        mismatches,
+                        sep,
+                        None,  # row_limit
+                        method,
+                        allowed_keys_ordered=allowed_keys,
+                        mismatch_penalty=step.get("mismatch_penalty", -1),
+                        gap_penalty=step.get("gap_penalty", -3),
+                        match_score=step.get("match_score", 1),
+                        min_score=step.get("min_score", 0),
+                        rescue_exhaustive=step.get("rescue_exhaustive", False),
+                        rescue_kmer_size=step.get("rescue_kmer_size", 3),
+                        rescue_min_overlap=step.get("rescue_min_overlap", 1),
+                        rescue_strategy=step.get("rescue_strategy", "random"),
+                    )
+                
+                logger.info(f"Step {step_num} complete")
+                
+                # Update input for next iteration
+                current_input = current_output
+        
+        finally:
+            # Clean up temporary directories
+            for temp_dir in temp_dirs:
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+                    logger.debug(f"Cleaned up temp directory: {temp_dir}")
+
     def run(self) -> None:
         """Run the collapse command.
 
@@ -500,6 +623,26 @@ class CollapseCommand(BaseCommand):
         # Load config if provided
         if self.args.config:
             self._load_config(self.args.config)
+
+        # Check if steps are defined in config
+        if self._config and "steps" in self._config and isinstance(self._config["steps"], list):
+            # Execute steps mode
+            logger.info("Running in steps mode (iterative collapse)")
+            
+            # Validate input/output arguments
+            if not self.args.input_dir:
+                raise ValueError("Steps mode requires --input-dir")
+            if not self.args.output_dir:
+                raise ValueError("Steps mode requires --output-dir")
+            
+            self._execute_steps(
+                self._config["steps"],
+                self.args.input_dir,
+                self.args.output_dir,
+            )
+            
+            logger.info(f"All steps complete. Final output in: {self.args.output_dir}")
+            return
 
         # Merge config and args with defaults
         defaults = {
@@ -561,6 +704,10 @@ class CollapseCommand(BaseCommand):
                     gap_penalty=self.args.gap_penalty,
                     match_score=self.args.match_score,
                     min_score=self.args.min_score,
+                    rescue_exhaustive=self.args.rescue_exhaustive,
+                    rescue_kmer_size=self.args.rescue_kmer_size,
+                    rescue_min_overlap=self.args.rescue_min_overlap,
+                    rescue_strategy=self.args.rescue_strategy,
                 )
 
                 # Print metrics
@@ -625,6 +772,10 @@ class CollapseCommand(BaseCommand):
                     gap_penalty=self.args.gap_penalty,
                     match_score=self.args.match_score,
                     min_score=self.args.min_score,
+                    rescue_exhaustive=self.args.rescue_exhaustive,
+                    rescue_kmer_size=self.args.rescue_kmer_size,
+                    rescue_min_overlap=self.args.rescue_min_overlap,
+                    rescue_strategy=self.args.rescue_strategy,
                 )
 
                 # Store metrics for this file
