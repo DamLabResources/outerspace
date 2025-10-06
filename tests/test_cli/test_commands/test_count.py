@@ -326,6 +326,150 @@ def test_count_single_file_with_allowed_list():
             assert "key3" not in content
 
 
+def test_count_single_file_with_allowed_list_and_key_rescue():
+    """Keys close to allowed keys should be rescued when enabled"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test input file with a near-miss key
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi3_umi5_corrected\n")
+            f.write("key1,bar1\n")
+            f.write("key1,bar2\n")
+            f.write("key2,bar3\n")
+            f.write("keyX,bar4\n")  # Near 'key1' (1 mismatch at last char)
+
+        # Create allowed list file (only key1 and key2 allowed)
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+            f.write("key2\n")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "count",
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+            "--barcode-column",
+            "umi3_umi5_corrected",
+            "--key-column",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--key-rescue",
+            "--key-mismatch-penalty",
+            "-1",
+            "--key-gap-penalty",
+            "-3",
+            "--key-match-score",
+            "1",
+            "--key-min-score",
+            "2",
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        # Verify output file exists and that 'keyX' was rescued to 'key1'
+        assert os.path.exists(output_file)
+        with open(output_file, "r") as f:
+            content = f.read()
+            # key1 receives 2 original + 1 rescued = 3
+            assert "key1,3" in content
+            assert "key2,1" in content
+            assert "keyX" not in content
+
+
+def test_count_single_file_with_allowed_list_no_rescue_when_disabled():
+    """Near-miss keys should not be counted if rescue is disabled"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi3_umi5_corrected\n")
+            f.write("key1,bar1\n")
+            f.write("keyX,bar2\n")  # Near 'key1'
+
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "count",
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+            "--barcode-column",
+            "umi3_umi5_corrected",
+            "--key-column",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            # rescue NOT enabled
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        with open(output_file, "r") as f:
+            content = f.read()
+            assert "key1,1" in content
+            assert "keyX" not in content
+
+
+def test_count_directory_mode_with_rescue():
+    """Directory processing should also support key rescue"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_dir = os.path.join(temp_dir, "in")
+        os.makedirs(input_dir, exist_ok=True)
+
+        f1 = os.path.join(input_dir, "a.csv")
+        with open(f1, "w") as f:
+            f.write("protospacer,umi3_umi5_corrected\n")
+            f.write("key1,bar1\n")
+            f.write("kay1,bar2\n")  # 1 mismatch vs key1
+
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+
+        output_dir = os.path.join(temp_dir, "out")
+
+        args = [
+            "count",
+            "--input-dir",
+            input_dir,
+            "--output-dir",
+            output_dir,
+            "--barcode-column",
+            "umi3_umi5_corrected",
+            "--key-column",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--key-rescue",
+            "--key-mismatch-penalty",
+            "-1",
+            "--key-gap-penalty",
+            "-3",
+            "--key-match-score",
+            "1",
+            "--key-min-score",
+            "2",
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        out_file = os.path.join(output_dir, "a.csv")
+        assert os.path.exists(out_file)
+        with open(out_file, "r") as f:
+            content = f.read()
+            assert "key1,2" in content  # rescued kay1 -> key1
+
+
 def test_count_with_config_file():
     """Test that count command loads and uses config file correctly"""
     with tempfile.TemporaryDirectory() as temp_dir:

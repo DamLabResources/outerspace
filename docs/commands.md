@@ -99,6 +99,7 @@ Common Arguments:
 Counts unique barcodes per key value in CSV files. Features:
 - Barcode and key column specification
 - `--allowed-list` filtering
+- Optional key rescue with edit-tolerant matching to allowed keys
 - Downsampling capability
 - Detailed output with barcode lists
 - Gini coefficient calculation for both barcodes and keys
@@ -108,6 +109,11 @@ usage: outerspace count [-h] (--input-file INPUT_FILE | --input-dir INPUT_DIR)
                         (--output-file OUTPUT_FILE | --output-dir OUTPUT_DIR)
                         [--barcode-column BARCODE_COLUMN] [--key-column KEY_COLUMN]
                         [--sep SEP] [--row-limit ROW_LIMIT] [--allowed-list ALLOWED_LIST]
+                        [--key-rescue] [--key-min-score KEY_MIN_SCORE]
+                        [--key-match-score KEY_MATCH_SCORE]
+                        [--key-mismatch-penalty KEY_MISMATCH_PENALTY]
+                        [--key-gap-penalty KEY_GAP_PENALTY]
+                        [--key-rescue-strategy KEY_RESCUE_STRATEGY]
                         [--detailed] [--downsample DOWNSAMPLE] [--random-seed RANDOM_SEED]
                         [--config CONFIG] [--progress-bar] [--log-file LOG_FILE] 
                         [--log-level LOG_LEVEL]
@@ -133,6 +139,19 @@ options:
                         Process only the first N rows (for testing)
   --allowed-list ALLOWED_LIST
                         Text file containing allowed keys (one per line)
+  --key-rescue          If --allowed-list is provided, rescue near-miss keys by
+                        aligning to the closest allowed key
+  --key-min-score KEY_MIN_SCORE
+                        Minimum alignment score required to accept a rescued key (default: 0)
+  --key-match-score KEY_MATCH_SCORE
+                        Score for character matches when aligning keys (default: 1)
+  --key-mismatch-penalty KEY_MISMATCH_PENALTY
+                        Penalty for mismatches when aligning keys (default: -1)
+  --key-gap-penalty KEY_GAP_PENALTY
+                        Penalty for gaps/indels when aligning keys (default: -3)
+  --key-rescue-strategy KEY_RESCUE_STRATEGY
+                        Strategy to choose among multiple equally good rescued keys
+                        (choices: random, first, last, all; default: random)
   --detailed            Include barcode lists in output
   --downsample DOWNSAMPLE
                         Randomly sample reads with probability between 0 and 1

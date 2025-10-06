@@ -38,6 +38,23 @@ method = 'directional'
 [count]
 barcode_column = 'UMI_5prime_UMI_3prime_corrected'
 key_column = 'protospacer'
+allowed_list = 'data/library_protospacers.txt'
+
+# Use key rescue
+key_rescue = true
+
+# Alignment Parameters
+key_mismatch_penalty = -1
+key_gap_penalty = -2
+key_match_score = 0
+# Up to 3 mm or 1 indel 1 mm
+key_min_score = -3
+
+key_rescue_strategy = 'random'
+
+# Approximate matching
+key_rescue_kmer_size = 3
+key_rescue_min_overlap = 8
 
 [gini]
 column = 'UMI_5prime_UMI_3prime_corrected_count'

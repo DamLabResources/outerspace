@@ -233,17 +233,90 @@ outerspace stats -c grnaquery.toml \
 
 For more stringent analysis, you can filter results to only include expected protospacers:
 
-### Step 3b: Count with Allowed List
+### Step 3b: Count with Allowed List and Key Rescue
 
 ```bash
-# Count barcodes using only library protospacers
+# Count barcodes using only library protospacers and rescue near-miss keys
 outerspace count -c grnaquery.toml \
     --input-dir results/collapse \
     --output-dir results/count_filtered \
-    --allowed-list data/library_protospacers.txt
+    --allowed-list data/library_protospacers.txt \
+    --key-rescue --key-min-score -3 --key-match-score 0 \
+    --key-mismatch-penalty -1 --key-gap-penalty -2 \
+    --key-rescue-strategy 'all'
 ```
 
-**Note**: The `--allowed-list` parameter overrides any config file settings to add filtering.
+#### Key rescue uses NW alignment to find hits with mismatches
+
+When `--key-rescue` is enabled, any protospacer which doesn't match an allowed protospacer will be matche d to the nearest one.
+With `--key-rescue-strategy 'all'`, all protospacers with the same minimum score will be attributed a fractional count.
+This can also be set to `first`, `last`, or `random`.
+
+The n-wise global aligment search is a costly operation to perform on each read.
+In order to accelerate this process, an approximate matching method has been employed.
+
+#### Prescreening strategy for key rescue (k-mer approximate matching)
+
+- It precomputes sliding k-mers for every allowed key
+- For each query key, it computes its k-mers and only aligns against allowed keys that share at least a minimum number of k-mers
+- This radically reduces expensive alignments
+- Increasing min-overlap improves speed at the cost of increased false negatives
+
+You can tune the prescreen with these flags:
+
+- `--key-rescue-kmer-size`: k-mer length used for prescreening (default: 3)
+- `--key-rescue-min-overlap`: minimum shared k-mers required to attempt alignment (default: 1)
+- `--key-rescue-exhaustive`: disable prescreen and align against all allowed keys (slower)
+
+Examples:
+
+```bash
+# Stricter prescreen (fewer alignments)
+outerspace count -c grnaquery.toml \
+  --input-dir results/collapse \
+  --output-dir results/count_filtered \
+  --allowed-list data/library_protospacers.txt \
+  --key-rescue \
+  --key-rescue-kmer-size 4 \
+  --key-rescue-min-overlap 2
+```
+
+```bash
+# Exhaustive search (no prescreen)
+outerspace count -c grnaquery.toml \
+  --input-dir results/collapse \
+  --output-dir results/count_filtered \
+  --allowed-list data/library_protospacers.txt \
+  --key-rescue \
+  --key-rescue-exhaustive
+```
+
+In TOML configs, you can set:
+
+```toml
+[count]
+key_rescue = true
+key_rescue_kmer_size = 3     # same as --key-rescue-kmer-size
+key_rescue_min_overlap = 8   # same as --key-rescue-min-overlap
+```
+
+Command-line flags override TOML values when both are provided. Use exhaustive mode from the CLI if you want to temporarily disable the prescreen for testing.
+
+**Notes**:
+- The `--allowed-list` parameter enables filtering to expected protospacers.
+- You can enable key rescue directly in the TOML (recommended for increasing the number of useful reads):
+
+```toml
+[count]
+allowed_list = 'data/library_protospacers.txt'
+key_rescue = true
+key_mismatch_penalty = -1
+key_gap_penalty = -3
+key_match_score = 1
+key_min_score = 17
+```
+
+Command-line flags will override TOML values when provided.
 
 ### Step 4b: Merge Filtered Results
 
@@ -338,4 +411,4 @@ After completing this tutorial, you can:
 **Parameter conflicts**: Command-line arguments always override config file settings
 
 
-### Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
+Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

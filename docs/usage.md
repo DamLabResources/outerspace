@@ -53,6 +53,14 @@ outerspace collapse -c config.toml --input-file exp_output.csv --output-file exp
 outerspace count -c config.toml --input-file ctrl_output_collapsed.csv --output-file ctrl_counts.csv
 outerspace count -c config.toml --input-file exp_output_collapsed.csv --output-file exp_counts.csv
 
+# Count with allowed list and key rescue (override via CLI)
+outerspace count -c config.toml \
+  --input-file exp_output_collapsed.csv \
+  --output-file exp_counts_filtered.csv \
+  --allowed-list data/library_protospacers.txt \
+  --key-rescue --key-min-score 17 --key-match-score 1 \
+  --key-mismatch-penalty -1 --key-gap-penalty -3
+
 # Calculate statistics (uses config settings)
 outerspace stats -c config.toml ctrl_counts.csv exp_counts.csv
 

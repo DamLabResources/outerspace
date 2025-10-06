@@ -134,5 +134,4 @@ def test_pipeline_from_directory_accepts_snakemake_args(temp_workspace):
         # Change back to original directory
         os.chdir(original_dir)
 
-
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
