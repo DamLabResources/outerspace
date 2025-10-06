@@ -335,14 +335,14 @@ def test_count_single_file_with_allowed_list_and_key_rescue():
             f.write("protospacer,umi3_umi5_corrected\n")
             f.write("key1,bar1\n")
             f.write("key1,bar2\n")
-            f.write("key2,bar3\n")
+            f.write("notkey2,bar3\n")
             f.write("keyX,bar4\n")  # Near 'key1' (1 mismatch at last char)
 
         # Create allowed list file (only key1 and key2 allowed)
         allowed_list = os.path.join(temp_dir, "allowed.txt")
         with open(allowed_list, "w") as f:
             f.write("key1\n")
-            f.write("key2\n")
+            f.write("notkey2\n")
 
         # Create output file path
         output_file = os.path.join(temp_dir, "output.csv")
@@ -379,7 +379,7 @@ def test_count_single_file_with_allowed_list_and_key_rescue():
             content = f.read()
             # key1 receives 2 original + 1 rescued = 3
             assert "key1,3" in content
-            assert "key2,1" in content
+            assert "notkey2,1" in content
             assert "keyX" not in content
 
 
