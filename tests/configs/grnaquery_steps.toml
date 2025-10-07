@@ -1,6 +1,6 @@
-# Configuration file for gRNA extraction.
+# Configuration file for gRNA extraction with iterative collapse steps.
 
-title = "gRNA Extraction Input"
+title = "gRNA Extraction with Iterative Collapse"
 
 # Global patterns that can be used across multiple commands
 [[patterns]]
@@ -25,12 +25,10 @@ orientation = "forward"
 multiple = "first"
 
 [findseq]
-# Reference patterns by name or use all patterns
 pattern_names = ["UMI_5prime", "protospacer", "UMI_3prime"]
-# Alternative: use_all_patterns = true
 matches_only = true
 
-# Iterative collapse steps (recommended approach)
+# Iterative collapse steps
 [[collapse.steps]]
 name = "umi_correction"
 columns = "UMI_5prime,UMI_3prime"
@@ -41,21 +39,15 @@ mismatches = 2
 name = "protospacer_correction"
 columns = "protospacer"
 method = "nearest"
-allowed_list = "data/library_protospacers.txt"
+allowed_list = "library_protospacers.txt"
 mismatch_penalty = -1
-gap_penalty = -2
-match_score = 0
-min_score = -3
-rescue_strategy = "random"
-rescue_kmer_size = 3
-rescue_min_overlap = 8
+gap_penalty = -3
+match_score = 1
+min_score = 0
 
 [count]
 barcode_column = 'UMI_5prime_UMI_3prime_corrected'
 key_column = 'protospacer_corrected'
-
-[gini]
-column = 'UMI_5prime_UMI_3prime_corrected_count'
 
 [merge]
 column = 'UMI_5prime_UMI_3prime_corrected_count'
@@ -68,3 +60,4 @@ count_column = 'UMI_5prime_UMI_3prime_corrected_count'
 [owner]
 name = "SCB, DK, WND, RB"
 organization = "DUCOM"
+

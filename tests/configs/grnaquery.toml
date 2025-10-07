@@ -35,6 +35,23 @@ columns = 'UMI_5prime,UMI_3prime'
 mismatches = 2
 method = 'directional'
 
+# Alternative: Use iterative steps for multi-stage collapse
+# [[collapse.steps]]
+# name = "umi_correction"
+# columns = "UMI_5prime,UMI_3prime"
+# method = "directional"
+# mismatches = 2
+# 
+# [[collapse.steps]]
+# name = "protospacer_correction"
+# columns = "protospacer"
+# method = "nearest"
+# allowed_list = "library_protospacers.txt"
+# mismatch_penalty = -1
+# gap_penalty = -3
+# match_score = 1
+# min_score = 0
+
 [count]
 barcode_column = 'UMI_5prime_UMI_3prime_corrected'
 key_column = 'protospacer'

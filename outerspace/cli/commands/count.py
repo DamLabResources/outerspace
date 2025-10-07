@@ -23,7 +23,6 @@ from outerspace.cli.commands.base import BaseCommand
 from outerspace.umi import UMI
 from outerspace.stats import GiniCoefficient, SimpsonDiversity
 from outerspace.cli.logging_config import setup_logging
-from outerspace.nearest import NearestUMIFinder
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -80,7 +79,9 @@ class CountCommand(BaseCommand):
         )
         parser.add_argument(
             "--allowed-list",
-            help="Text file containing allowed keys (one per line)",
+            help=(
+                "DEPRECATED: Use collapse --method allowed/nearest instead. "
+            ),
             default=None,
         )
         parser.add_argument(
@@ -95,71 +96,6 @@ class CountCommand(BaseCommand):
             "--random-seed", type=int, help="Random seed for downsampling"
         )
 
-        # Key rescue options (optional)
-        parser.add_argument(
-            "--key-rescue",
-            action="store_true",
-            help=(
-                "If --allowed-list is provided, attempt to rescue keys not in the list "
-                "by mapping them to the closest allowed key using global alignment."
-            ),
-        )
-        parser.add_argument(
-            "--key-min-score",
-            type=int,
-            default=0,
-            help="Minimum alignment score required to rescue a key (default: 0)",
-        )
-        parser.add_argument(
-            "--key-match-score",
-            type=int,
-            default=1,
-            help="Score for matches when aligning keys (default: 1)",
-        )
-        parser.add_argument(
-            "--key-mismatch-penalty",
-            type=int,
-            default=-1,
-            help="Penalty for mismatches when aligning keys (default: -1)",
-        )
-        parser.add_argument(
-            "--key-gap-penalty",
-            type=int,
-            default=-3,
-            help="Penalty for gaps/indels when aligning keys (default: -3)",
-        )
-
-        # K-mer prescreen parameters
-        parser.add_argument(
-            "--key-rescue-kmer-size",
-            type=int,
-            default=3,
-            help="K-mer size for approximate key prescreen (default: 3)",
-        )
-        parser.add_argument(
-            "--key-rescue-min-overlap",
-            type=int,
-            default=1,
-            help=(
-                "Minimum number of shared k-mers required before alignment "
-                "(default: 1)"
-            ),
-        )
-        parser.add_argument(
-            "--key-rescue-exhaustive",
-            action="store_true",
-            help=(
-                "Disable k-mer prescreen and align against all allowed keys "
-                "(slower, exhaustive search)"
-            ),
-        )
-
-        parser.add_argument(
-            "--key-rescue-strategy",
-            type=str,
-            default="random",
-            help="Strategy to choose the best mapped key when multiple are found (default: random)",
-        )
         self._add_common_args(parser)
 
     def _read_allowed_keys(self, filepath: str) -> Tuple[str, ...]:
@@ -199,10 +135,6 @@ class CountCommand(BaseCommand):
         sep: str,
         row_limit: Optional[int],
         allowed_keys_ordered: Optional[Tuple[str, ...]],
-        key_mismatch_penalty: Optional[int],
-        key_gap_penalty: Optional[int],
-        key_match_score: Optional[int],
-        key_min_score: Optional[int],
         detailed: bool,
         downsample: Optional[float] = None,
     ) -> Dict[str, Any]:
@@ -226,15 +158,7 @@ class CountCommand(BaseCommand):
         row_limit : Optional[int]
             Maximum number of rows to process (for testing)
         allowed_keys_ordered : Optional[Tuple[str, ...]]
-            Allowed keys in file order (for deterministic rescue)
-        key_mismatch_penalty : Optional[int]
-            Mismatch penalty for key rescue
-        key_gap_penalty : Optional[int]
-            Gap penalty for key rescue
-        key_match_score : Optional[int]
-            Match score for key rescue
-        key_min_score : Optional[int]
-            Minimum score threshold to accept a rescued key
+            Allowed keys for exact-match filtering only (DEPRECATED - use collapse instead)
         detailed : bool
             Whether to include barcode lists in output
         downsample : Optional[float], default=None
@@ -256,24 +180,7 @@ class CountCommand(BaseCommand):
         umi = UMI(mismatches=0)
         key_umi = UMI(mismatches=0)  # For key counts
 
-        rescued_count = 0
-        multiple_rescued_count = 0
-
         allowed_keys_set = set(allowed_keys_ordered) if allowed_keys_ordered else set()
-
-        # Prepare nearest finder with k-mer prescreen if rescue is enabled
-        finder = None
-        if self.args.key_rescue and allowed_keys_ordered:
-            finder = NearestUMIFinder(
-                allowed_list=allowed_keys_ordered,
-                mismatch_penalty=key_mismatch_penalty if key_mismatch_penalty is not None else -1,
-                gap_penalty=key_gap_penalty if key_gap_penalty is not None else -3,
-                match_score=key_match_score if key_match_score is not None else 1,
-                min_score=key_min_score if key_min_score is not None else 0,
-                use_prescreen=not self.args.key_rescue_exhaustive,
-                kmer_size=self.args.key_rescue_kmer_size,
-                min_kmer_overlap=self.args.key_rescue_min_overlap,
-            )
 
         # Read rows and collect barcodes per key
         barcodes_by_key = defaultdict(set)
@@ -314,7 +221,7 @@ class CountCommand(BaseCommand):
                     key_umi.consume(key)
                     continue
 
-                # Case 2: allowed_keys provided and key is in the set
+                # Case 2: allowed_keys provided and key is in the set (exact match only)
                 if key in allowed_keys_set:
                     rows_with_allowed_key += 1
                     barcodes_by_key[key].add(barcode)
@@ -322,44 +229,8 @@ class CountCommand(BaseCommand):
                     key_umi.consume(key)
                     continue
 
-                # Case 3: key not in allowed_keys; attempt rescue if enabled
-                if self.args.key_rescue and finder is not None:
-                    # Use NearestUMIFinder with k-mer prescreen to map to allowed keys
-                    mapped_keys = finder.find(key)
-                    if mapped_keys:
-                        mapped_key = None
-                        # If there is only one mapped key, use it
-                        if len(mapped_keys) == 1:
-                            mapped_key = mapped_keys[0]
-                        else:
-                            multiple_rescued_count += 1
-                            # If there are multiple mapped keys, use the strategy to choose one
-                            if self.args.key_rescue_strategy == "random":
-                                mapped_key = random.choice(mapped_keys)
-                            elif self.args.key_rescue_strategy == "first":
-                                mapped_key = mapped_keys[0]
-                            elif self.args.key_rescue_strategy == "last":
-                                mapped_key = mapped_keys[-1]
-                            elif self.args.key_rescue_strategy == "all":
-                                rescued_count += 1
-                                for mapped_key in mapped_keys:
-                                    barcodes_by_key[mapped_key].add(barcode)
-                                    umi.consume(barcode)
-                                    key_umi.consume(mapped_key)
-                                continue
-                            
-                        if mapped_key:
-                            rescued_count += 1
-                            barcodes_by_key[mapped_key].add(barcode)
-                            umi.consume(barcode)
-                            key_umi.consume(mapped_key)
-
-                        continue
-                        
-                        
-                        
-
-                # If not rescued, ignore this key (do not count)
+                # Case 3: key not in allowed_keys; ignore (no rescue in count command)
+                # Users should use collapse --method nearest for key correction
                 continue
 
         # Calculate summary statistics
@@ -391,11 +262,6 @@ class CountCommand(BaseCommand):
         )
         logger.info(f"Barcode Simpson diversity: {barcode_simpson:.3f}")
         logger.info(f"Key Simpson diversity: {key_simpson:.3f}")
-
-        # Log rescue info if applicable
-        if self.args.key_rescue and allowed_keys_ordered:
-            logger.info(f"Keys rescued (mapped to allowed list): {rescued_count}")
-            logger.info(f"Keys rescued (mapped to allowed list with multiple matches): {multiple_rescued_count}")
 
         if allowed_keys_ordered:
             logger.info(f"Rows with allowed key: {rows_with_allowed_key}")
@@ -511,6 +377,22 @@ class CountCommand(BaseCommand):
         # Read allowed keys if specified
         allowed_keys: Optional[Tuple[str, ...]] = None
         if self.args.allowed_list:
+            logger.warning("=" * 80)
+            logger.warning("DEPRECATION WARNING: --allowed-list in count command")
+            logger.warning("")
+            logger.warning("The --allowed-list feature is deprecated for the count command.")
+            logger.warning("It will only perform exact matching (filtering).")
+            logger.warning("")
+            logger.warning("For key correction/rescue, use collapse with iterative steps:")
+            logger.warning("")
+            logger.warning("  [[collapse.steps]]")
+            logger.warning("  name = \"key_correction\"")
+            logger.warning("  columns = \"your_key_column\"")
+            logger.warning("  method = \"nearest\"  # or \"allowed\" for exact matching")
+            logger.warning("  allowed_list = \"allowed_keys.txt\"")
+            logger.warning("")
+            logger.warning("Continuing with exact-match filtering only...")
+            logger.warning("=" * 80)
             allowed_keys = self._read_allowed_keys(self.args.allowed_list)
 
         # No UMI normalization in this command; UMIs are random, we count all
@@ -533,10 +415,6 @@ class CountCommand(BaseCommand):
                     sep=self.args.sep,
                     row_limit=self.args.row_limit,
                     allowed_keys_ordered=allowed_keys,
-                    key_mismatch_penalty=self.args.key_mismatch_penalty,
-                    key_gap_penalty=self.args.key_gap_penalty,
-                    key_match_score=self.args.key_match_score,
-                    key_min_score=self.args.key_min_score,
                     detailed=self.args.detailed,
                     downsample=self.args.downsample,
                 )
@@ -580,10 +458,6 @@ class CountCommand(BaseCommand):
                     sep=self.args.sep,
                     row_limit=self.args.row_limit,
                     allowed_keys_ordered=allowed_keys,
-                    key_mismatch_penalty=self.args.key_mismatch_penalty,
-                    key_gap_penalty=self.args.key_gap_penalty,
-                    key_match_score=self.args.key_match_score,
-                    key_min_score=self.args.key_min_score,
                     detailed=self.args.detailed,
                     downsample=self.args.downsample,
                 )

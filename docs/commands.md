@@ -49,10 +49,13 @@ Common Arguments:
 ```
 
 ### `outerspace collapse`
-Corrects barcodes in CSV files using UMI-tools clustering. Features:
+Corrects barcodes in CSV files using UMI-tools clustering or nearest-neighbor matching. Features:
 - Supports multiple barcode columns
 - Configurable mismatch tolerance
-- Multiple clustering methods (cluster, adjacency, directional)
+- Multiple clustering methods (cluster, adjacency, directional) for UMI correction
+- Nearest-neighbor matching for key correction with allowed lists
+- Exact matching with allowed lists
+- Iterative collapse steps via TOML configuration
 - Row limiting for testing
 - Detailed metrics output
 
@@ -60,11 +63,18 @@ Corrects barcodes in CSV files using UMI-tools clustering. Features:
 usage: outerspace collapse [-h] (--input-file INPUT_FILE | --input-dir INPUT_DIR)
                            (--output-file OUTPUT_FILE | --output-dir OUTPUT_DIR)
                            [--columns COLUMNS] [--mismatches MISMATCHES] [--sep SEP]
-                           [--row-limit ROW_LIMIT] [--method {cluster,adjacency,directional}]
+                           [--row-limit ROW_LIMIT] 
+                           [--method {cluster,adjacency,directional,allowed,nearest}]
+                           [--allowed-list ALLOWED_LIST]
+                           [--min-score MIN_SCORE] [--match-score MATCH_SCORE]
+                           [--mismatch-penalty MISMATCH_PENALTY] [--gap-penalty GAP_PENALTY]
+                           [--rescue-kmer-size RESCUE_KMER_SIZE]
+                           [--rescue-min-overlap RESCUE_MIN_OVERLAP]
+                           [--rescue-exhaustive] [--rescue-strategy {random,first,last,all}]
                            [--metrics METRICS] [--config CONFIG] [--progress-bar]
                            [--log-file LOG_FILE] [--log-level LOG_LEVEL]
 
-Correct barcodes in CSV files using UMI-tools clustering
+Correct barcodes in CSV files using UMI-tools clustering or nearest-neighbor matching
 
 options:
   -h, --help            show this help message and exit
@@ -82,9 +92,32 @@ options:
   --sep SEP             CSV separator (default: ,)
   --row-limit ROW_LIMIT
                         Process only the first N rows (for testing)
-  --method {cluster,adjacency,directional}
-                        Clustering method to use (default: directional)
+  --method {cluster,adjacency,directional,allowed,nearest}
+                        Correction method: cluster/adjacency/directional for UMI clustering,
+                        allowed for exact matching with allowed list, nearest for nearest-neighbor
+                        matching with allowed list (default: directional)
+  --allowed-list ALLOWED_LIST
+                        Text file containing allowed values (required for 'allowed' and 'nearest' methods)
+  --min-score MIN_SCORE
+                        Minimum alignment score for nearest-neighbor rescue (default: 0)
+  --match-score MATCH_SCORE
+                        Score for character matches in alignment (default: 1)
+  --mismatch-penalty MISMATCH_PENALTY
+                        Penalty for mismatches in alignment (default: -1)
+  --gap-penalty GAP_PENALTY
+                        Penalty for gaps/indels in alignment (default: -3)
+  --rescue-kmer-size RESCUE_KMER_SIZE
+                        K-mer size for prescreening candidates (default: 3)
+  --rescue-min-overlap RESCUE_MIN_OVERLAP
+                        Minimum k-mer overlap to consider a candidate (default: 1)
+  --rescue-exhaustive   Disable k-mer prescreening (slower but guaranteed optimal)
+  --rescue-strategy {random,first,last,all}
+                        Strategy for choosing among tied rescued values (default: random)
   --metrics METRICS     Output YAML file for metrics
+
+Iterative Steps (TOML Config Only):
+  Define multi-step corrections using [[collapse.steps]] in your TOML config file.
+  See docs/collapse_steps.md for details.
 
 Common Arguments:
   --config CONFIG, -c CONFIG
@@ -98,22 +131,16 @@ Common Arguments:
 ### `outerspace count`
 Counts unique barcodes per key value in CSV files. Features:
 - Barcode and key column specification
-- `--allowed-list` filtering
-- Optional key rescue with edit-tolerant matching to allowed keys
+- `--allowed-list` exact-match filtering (DEPRECATED - use collapse for key correction)
 - Downsampling capability
 - Detailed output with barcode lists
-- Gini coefficient calculation for both barcodes and keys
+- Gini coefficient and Simpson diversity calculation for both barcodes and keys
 
 ```bash
 usage: outerspace count [-h] (--input-file INPUT_FILE | --input-dir INPUT_DIR)
                         (--output-file OUTPUT_FILE | --output-dir OUTPUT_DIR)
                         [--barcode-column BARCODE_COLUMN] [--key-column KEY_COLUMN]
                         [--sep SEP] [--row-limit ROW_LIMIT] [--allowed-list ALLOWED_LIST]
-                        [--key-rescue] [--key-min-score KEY_MIN_SCORE]
-                        [--key-match-score KEY_MATCH_SCORE]
-                        [--key-mismatch-penalty KEY_MISMATCH_PENALTY]
-                        [--key-gap-penalty KEY_GAP_PENALTY]
-                        [--key-rescue-strategy KEY_RESCUE_STRATEGY]
                         [--detailed] [--downsample DOWNSAMPLE] [--random-seed RANDOM_SEED]
                         [--config CONFIG] [--progress-bar] [--log-file LOG_FILE] 
                         [--log-level LOG_LEVEL]
@@ -138,20 +165,8 @@ options:
   --row-limit ROW_LIMIT
                         Process only the first N rows (for testing)
   --allowed-list ALLOWED_LIST
-                        Text file containing allowed keys (one per line)
-  --key-rescue          If --allowed-list is provided, rescue near-miss keys by
-                        aligning to the closest allowed key
-  --key-min-score KEY_MIN_SCORE
-                        Minimum alignment score required to accept a rescued key (default: 0)
-  --key-match-score KEY_MATCH_SCORE
-                        Score for character matches when aligning keys (default: 1)
-  --key-mismatch-penalty KEY_MISMATCH_PENALTY
-                        Penalty for mismatches when aligning keys (default: -1)
-  --key-gap-penalty KEY_GAP_PENALTY
-                        Penalty for gaps/indels when aligning keys (default: -3)
-  --key-rescue-strategy KEY_RESCUE_STRATEGY
-                        Strategy to choose among multiple equally good rescued keys
-                        (choices: random, first, last, all; default: random)
+                        DEPRECATED: Text file containing allowed keys (exact match only).
+                        For key correction, use 'collapse --method nearest' instead.
   --detailed            Include barcode lists in output
   --downsample DOWNSAMPLE
                         Randomly sample reads with probability between 0 and 1
