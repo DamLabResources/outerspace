@@ -215,6 +215,64 @@ def test_parse_executor_dryrun_overrides():
     assert executor == "dryrun"
 
 
+def test_parse_profile_not_specified():
+    """Test parsing profile when not specified"""
+    cmd = PipelineCommand()
+    profile = cmd._parse_profile([])
+    assert profile is None
+
+
+def test_parse_profile_specified(tmp_path):
+    """Test parsing profile when specified"""
+    cmd = PipelineCommand()
+    profile_dir = tmp_path / "my_profile"
+    profile_dir.mkdir()
+    
+    profile = cmd._parse_profile(['--profile', str(profile_dir)])
+    assert profile == profile_dir
+
+
+def test_parse_profile_not_exists():
+    """Test parsing profile that doesn't exist"""
+    cmd = PipelineCommand()
+    profile = cmd._parse_profile(['--profile', '/nonexistent/profile'])
+    assert profile is None
+
+
+def test_load_profile_config(tmp_path):
+    """Test loading profile configuration"""
+    cmd = PipelineCommand()
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    
+    config_file = profile_dir / "config.yaml"
+    config_file.write_text("executor: slurm\njobs: 50\nslurm_partition: compute\n")
+    
+    config = cmd._load_profile_config(profile_dir)
+    assert config["executor"] == "slurm"
+    assert config["jobs"] == 50
+    assert config["slurm_partition"] == "compute"
+
+
+def test_load_profile_config_v8plus(tmp_path):
+    """Test loading v8+ profile configuration"""
+    cmd = PipelineCommand()
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    
+    # Create v8+ config (should be preferred)
+    config_file = profile_dir / "config.v8+.yaml"
+    config_file.write_text("executor: slurm\ncores: 8\n")
+    
+    # Also create regular config
+    (profile_dir / "config.yaml").write_text("executor: local\ncores: 1\n")
+    
+    config = cmd._load_profile_config(profile_dir)
+    # Should use v8+ config
+    assert config["executor"] == "slurm"
+    assert config["cores"] == 8
+
+
 def test_is_dry_run_false():
     """Test dry-run detection when not set"""
     cmd = PipelineCommand()

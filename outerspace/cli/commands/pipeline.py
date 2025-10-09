@@ -346,6 +346,64 @@ class PipelineCommand(BaseCommand):
         # Default to local executor
         return "local"
 
+    def _parse_profile(self, snakemake_args: List[str]) -> Optional[Path]:
+        """Parse profile path from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Optional[Path]
+            Path to profile directory, or None if not specified
+        """
+        # Look for --profile argument
+        for i, arg in enumerate(snakemake_args):
+            if arg == "--profile" and i + 1 < len(snakemake_args):
+                profile_path = Path(snakemake_args[i + 1])
+                if profile_path.exists():
+                    return profile_path
+                else:
+                    logger.warning(f"Profile directory not found: {profile_path}")
+                    return None
+        return None
+
+    def _load_profile_config(self, profile_path: Path) -> Dict[str, Any]:
+        """Load configuration from a Snakemake profile directory.
+
+        Parameters
+        ----------
+        profile_path : Path
+            Path to the profile directory
+
+        Returns
+        -------
+        Dict[str, Any]
+            Profile configuration dictionary
+        """
+        # Try different config file names (v8+ first, then default)
+        config_files = [
+            profile_path / "config.v8+.yaml",
+            profile_path / "config.v8+.yml",
+            profile_path / "config.yaml",
+            profile_path / "config.yml",
+        ]
+        
+        for config_file in config_files:
+            if config_file.exists():
+                logger.info(f"Loading profile config from: {config_file}")
+                try:
+                    with open(config_file, "r") as f:
+                        profile_config = yaml.safe_load(f)
+                        return profile_config if profile_config else {}
+                except Exception as e:
+                    logger.warning(f"Failed to load profile config from {config_file}: {e}")
+        
+        logger.warning(f"No config file found in profile directory: {profile_path}")
+        return {}
+
     def _is_dry_run(self, snakemake_args: List[str]) -> bool:
         """Check if dry-run mode is requested.
 
@@ -387,11 +445,35 @@ class PipelineCommand(BaseCommand):
             snakemake_dir.mkdir(exist_ok=True)
             (snakemake_dir / "log").mkdir(exist_ok=True)
             
+            # Parse profile if provided
+            profile_path = self._parse_profile(snakemake_args)
+            profile_config = {}
+            if profile_path:
+                profile_config = self._load_profile_config(profile_path)
+                logger.info(f"Loaded profile from: {profile_path}")
+            
             # Parse configuration and execution settings
+            # Profile settings can be overridden by command-line args
             config_dict = self._parse_snakemake_config_dict(snakemake_args)
+            
+            # Get cores/jobs from args first, fall back to profile
             cores = self._parse_execution_cores(snakemake_args)
+            if cores is None and "cores" in profile_config:
+                cores = profile_config.get("cores")
+                logger.info(f"Using cores from profile: {cores}")
+            
             jobs = self._parse_jobs(snakemake_args)
+            if jobs is None and "jobs" in profile_config:
+                jobs = profile_config.get("jobs")
+                logger.info(f"Using jobs from profile: {jobs}")
+            
+            # Get executor from args first, fall back to profile
             executor = self._parse_executor(snakemake_args)
+            if executor == "local" and "executor" in profile_config:
+                # Only override if user didn't explicitly set executor
+                if "--executor" not in snakemake_args:
+                    executor = profile_config.get("executor", "local")
+                    logger.info(f"Using executor from profile: {executor}")
             
             # Configure resource settings based on executor type
             # For local/dryrun: use cores
@@ -453,14 +535,22 @@ class PipelineCommand(BaseCommand):
                                     for field in fields(executor_plugin.settings_cls):
                                         # Use the prefixed name (e.g., "slurm_logdir")
                                         prefixed_name = f"{executor_plugin.cli_prefix}_{field.name}"
-                                        # Set to None - the plugin will use its defaults
-                                        setattr(self, prefixed_name, None)
+                                        
+                                        # Check if profile has this setting
+                                        profile_value = profile_config.get(prefixed_name)
+                                        if profile_value is not None:
+                                            setattr(self, prefixed_name, profile_value)
+                                            logger.debug(f"Using {prefixed_name} from profile: {profile_value}")
+                                        else:
+                                            # Set to None - the plugin will use its defaults
+                                            setattr(self, prefixed_name, None)
                                 
                                 # Set sensible defaults for common executor settings
-                                # These will override None values
+                                # These will override None values (but not profile values)
                                 if executor == "slurm":
                                     # Use the .snakemake/log directory we created
-                                    self.slurm_logdir = snakemake_dir / "log"
+                                    if not hasattr(self, 'slurm_logdir') or self.slurm_logdir is None:
+                                        self.slurm_logdir = snakemake_dir / "log"
                         
                         args_obj = ExecutorArgs()
                         executor_settings = executor_plugin.get_settings(args_obj)

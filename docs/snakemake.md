@@ -55,6 +55,54 @@ To run the pipeline on a SLURM cluster, you need to:
 - Make sure you have sufficient permissions in the working directory
 - For large workflows, consider using `--latency-wait 60` to account for filesystem delays
 
+### Using Profiles
+
+Snakemake profiles allow you to store commonly-used settings in a configuration file, making it easier to run workflows consistently.
+
+**Creating a Profile:**
+
+Create a directory for your profile with a `config.yaml` or `config.v8+.yaml` file:
+
+```bash
+mkdir -p profiles/slurm
+```
+
+Create `profiles/slurm/config.v8+.yaml`:
+```yaml
+# Executor settings
+executor: slurm
+jobs: 100
+
+# SLURM-specific settings
+slurm_partition: compute
+slurm_account: myproject
+slurm_qos: normal
+
+# Resource defaults
+default-resources:
+  - mem_mb=4000
+  - runtime=120
+```
+
+**Using a Profile:**
+
+```bash
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--profile profiles/slurm"
+```
+
+**Profile Priority:**
+
+Settings are applied in this order (later overrides earlier):
+1. Profile settings
+2. Command-line arguments
+
+For example, this will use the profile but override jobs:
+```bash
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--profile profiles/slurm --jobs 200"
+```
+
 ### Using Other Executors
 
 Snakemake v9 supports various executor plugins. Common options include:
