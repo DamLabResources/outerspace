@@ -440,10 +440,28 @@ class PipelineCommand(BaseCommand):
                 if executor not in ["local", "dryrun", "touch"]:
                     try:
                         from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry
+                        from dataclasses import fields
+                        
                         executor_plugin = ExecutorPluginRegistry().get_plugin(executor)
-                        # Create a minimal argparse-like object with default values
+                        
+                        # Create args object with all required attributes set to None/defaults
+                        # The plugin will use defaults for any None values
                         class ExecutorArgs:
-                            pass
+                            def __init__(self):
+                                # Set default attributes based on the executor's settings class
+                                if executor_plugin.settings_cls:
+                                    for field in fields(executor_plugin.settings_cls):
+                                        # Use the prefixed name (e.g., "slurm_logdir")
+                                        prefixed_name = f"{executor_plugin.cli_prefix}_{field.name}"
+                                        # Set to None - the plugin will use its defaults
+                                        setattr(self, prefixed_name, None)
+                                
+                                # Set sensible defaults for common executor settings
+                                # These will override None values
+                                if executor == "slurm":
+                                    # Use the .snakemake/log directory we created
+                                    self.slurm_logdir = snakemake_dir / "log"
+                        
                         args_obj = ExecutorArgs()
                         executor_settings = executor_plugin.get_settings(args_obj)
                         logger.info(f"Loaded executor settings for {executor}")

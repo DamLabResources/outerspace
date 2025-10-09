@@ -73,12 +73,9 @@ Note: Executor plugins must be installed separately via pip (e.g., `pip install 
 
 ### SLURM Errors
 
-**Error: `'NoneType' object has no attribute 'logdir'`**
+**Error: `'NoneType' object has no attribute 'logdir'` or `'ExecutorArgs' object has no attribute 'slurm_logdir'`**
 
-This error typically occurs when:
-1. The SLURM executor plugin is not properly installed
-2. The working directory doesn't exist or lacks write permissions
-3. The `.snakemake` directory cannot be created
+These errors occur when executor-specific settings cannot be properly initialized. This has been fixed in the latest version.
 
 **Solution:**
 ```bash
@@ -91,10 +88,16 @@ pip install snakemake-executor-plugin-slurm
 # Verify the plugin is available
 python -c "from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry; print('slurm' in ExecutorPluginRegistry().plugins)"
 
-# Run the pipeline (it will create .snakemake/log automatically)
+# Run the pipeline (it will create .snakemake/log automatically and configure executor settings)
 outerspace pipeline config.toml snakemake_config.yaml \
     --snakemake-args="--executor slurm --jobs 100"
 ```
+
+**What the pipeline does automatically:**
+- Creates `.snakemake/log` directory for SLURM job logs
+- Initializes executor-specific settings with sensible defaults
+- Sets `slurm_logdir` to `.snakemake/log`
+- Configures other SLURM parameters to their defaults
 
 **Error: SLURM jobs not submitting**
 
