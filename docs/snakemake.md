@@ -73,15 +73,19 @@ Create `profiles/slurm/config.v8+.yaml`:
 executor: slurm
 jobs: 100
 
-# SLURM-specific settings
+# SLURM-specific settings (passed to the executor plugin)
 slurm_partition: compute
 slurm_account: myproject
 slurm_qos: normal
 
-# Resource defaults
+# Resource defaults (applied to all jobs unless overridden)
+# IMPORTANT: These are crucial for SLURM execution
+# The slurm_account is often REQUIRED by cluster configurations
 default-resources:
-  - mem_mb=4000
-  - runtime=120
+  - slurm_account=myproject      # REQUIRED for most SLURM clusters
+  - slurm_partition=compute      # Which partition to submit to
+  - mem_mb=4000                  # Default memory per job
+  - runtime=120                  # Default runtime in minutes
 ```
 
 **Using a Profile:**
@@ -154,12 +158,14 @@ Check that:
 - Your account has the necessary permissions
 - Resource requests are within allowed limits
 
-Use `--default-resources` to specify SLURM parameters:
+**Option 1: Use command-line arguments**
 ```bash
 outerspace pipeline config.toml snakemake_config.yaml \
     --snakemake-args="--executor slurm --jobs 100 \
     --default-resources slurm_account=myaccount slurm_partition=compute mem_mb=4000"
 ```
+
+**Option 2: Use a profile (recommended)** - Create a profile with `default-resources` as shown in the "Using Profiles" section above. The pipeline will automatically parse and apply these settings to all jobs.
 
 ### Workflow Debugging
 

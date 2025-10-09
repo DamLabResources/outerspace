@@ -26,6 +26,7 @@ import pulp
 import yaml
 
 from snakemake.api import SnakemakeApi
+from snakemake.resources import DefaultResources
 from snakemake.settings.types import (
     ConfigSettings,
     DAGSettings,
@@ -404,6 +405,41 @@ class PipelineCommand(BaseCommand):
         logger.warning(f"No config file found in profile directory: {profile_path}")
         return {}
 
+    def _parse_default_resources(self, profile_config: Dict[str, Any]) -> Optional[DefaultResources]:
+        """Parse default resources from profile configuration.
+
+        Parameters
+        ----------
+        profile_config : Dict[str, Any]
+            Profile configuration dictionary
+
+        Returns
+        -------
+        Optional[DefaultResources]
+            DefaultResources object if default-resources found in profile, None otherwise
+        """
+        # Check for both 'default-resources' and 'default_resources' keys
+        default_resources_list = profile_config.get("default-resources") or profile_config.get("default_resources")
+        
+        if not default_resources_list:
+            return None
+        
+        # Convert to list if it's a single string
+        if isinstance(default_resources_list, str):
+            default_resources_list = [default_resources_list]
+        
+        if not isinstance(default_resources_list, list):
+            logger.warning(f"default-resources must be a list, got {type(default_resources_list)}")
+            return None
+        
+        try:
+            default_resources = DefaultResources(args=default_resources_list)
+            logger.info(f"Loaded default resources from profile: {default_resources_list}")
+            return default_resources
+        except Exception as e:
+            logger.warning(f"Failed to parse default-resources: {e}")
+            return None
+
     def _is_dry_run(self, snakemake_args: List[str]) -> bool:
         """Check if dry-run mode is requested.
 
@@ -475,6 +511,9 @@ class PipelineCommand(BaseCommand):
                     executor = profile_config.get("executor", "local")
                     logger.info(f"Using executor from profile: {executor}")
             
+            # Parse default resources from profile
+            default_resources = self._parse_default_resources(profile_config)
+            
             # Configure resource settings based on executor type
             # For local/dryrun: use cores
             # For remote executors (slurm, etc.): use nodes (jobs) and optionally cores
@@ -488,8 +527,14 @@ class PipelineCommand(BaseCommand):
                 if cores is not None:
                     resource_kwargs["cores"] = cores
             
+            # Add default resources if available
+            if default_resources:
+                resource_kwargs["default_resources"] = default_resources
+            
             logger.info(f"Executor: {executor}")
             logger.info(f"Resource settings: {resource_kwargs}")
+            if default_resources:
+                logger.info(f"Default resources: {default_resources.args}")
             
             # Create output settings (use defaults for now)
             output_settings = OutputSettings()

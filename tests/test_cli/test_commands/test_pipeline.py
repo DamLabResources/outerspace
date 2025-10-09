@@ -273,6 +273,64 @@ def test_load_profile_config_v8plus(tmp_path):
     assert config["cores"] == 8
 
 
+def test_parse_default_resources_none():
+    """Test parsing default resources when none provided"""
+    cmd = PipelineCommand()
+    profile_config = {"executor": "slurm"}
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is None
+
+
+def test_parse_default_resources_list():
+    """Test parsing default resources from list"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": ["mem_mb=4000", "runtime=120", "slurm_account=myaccount"]
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    assert "mem_mb=4000" in result.args
+    assert "runtime=120" in result.args
+    assert "slurm_account=myaccount" in result.args
+
+
+def test_parse_default_resources_underscore():
+    """Test parsing default resources with underscore key"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default_resources": ["mem_mb=2000"]
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    assert "mem_mb=2000" in result.args
+
+
+def test_parse_default_resources_single_string():
+    """Test parsing default resources from single string"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": "mem_mb=4000"
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    assert "mem_mb=4000" in result.args
+
+
+def test_parse_default_resources_invalid_type():
+    """Test parsing default resources with invalid type"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": {"mem_mb": 4000}  # Wrong type
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is None
+
+
 def test_is_dry_run_false():
     """Test dry-run detection when not set"""
     cmd = PipelineCommand()
@@ -344,6 +402,60 @@ def test_execute_snakemake_success(tmp_path):
         mock_snakemake_api.workflow.assert_called_once()
         mock_workflow_api.dag.assert_called_once()
         mock_dag_api.execute_workflow.assert_called_once()
+
+
+def test_execute_snakemake_with_profile_default_resources(tmp_path):
+    """Test Snakemake execution with profile containing default-resources"""
+    cmd = PipelineCommand()
+    cmd.args = Mock()
+    
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Create profile with default-resources
+    profile_dir = tmp_path / 'profile'
+    profile_dir.mkdir()
+    profile_config = profile_dir / 'config.yaml'
+    profile_config.write_text(
+        'executor: local\n'
+        'cores: 2\n'
+        'default-resources:\n'
+        '  - mem_mb=4000\n'
+        '  - runtime=120\n'
+    )
+    
+    # Mock the new Snakemake v9 API
+    mock_dag_api = MagicMock()
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
+        # Execute with profile
+        cmd._execute_snakemake(snakefile, ['--profile', str(profile_dir)])
+        
+        # Verify API was called correctly
+        mock_snakemake_api.workflow.assert_called_once()
+        
+        # Verify that ResourceSettings was called with default_resources
+        call_kwargs = mock_snakemake_api.workflow.call_args[1]
+        resource_settings = call_kwargs['resource_settings']
+        assert hasattr(resource_settings, 'default_resources')
+        assert resource_settings.default_resources is not None
+        assert 'mem_mb=4000' in resource_settings.default_resources.args
+        assert 'runtime=120' in resource_settings.default_resources.args
 
 
 def test_execute_snakemake_failure(tmp_path):
