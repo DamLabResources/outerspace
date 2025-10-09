@@ -42,6 +42,19 @@ To run the pipeline on a SLURM cluster, you need to:
        --snakemake-args="--executor slurm --jobs 100"
    ```
 
+3. (Optional) Specify SLURM-specific resources:
+   ```bash
+   outerspace pipeline config.toml snakemake_config.yaml \
+       --snakemake-args="--executor slurm --jobs 100 \
+       --default-resources slurm_account=myaccount slurm_partition=compute"
+   ```
+
+**Important Notes:**
+- The pipeline automatically creates a `.snakemake/log` directory for SLURM logs
+- SLURM job logs will be written to `.snakemake/log/` by default
+- Make sure you have sufficient permissions in the working directory
+- For large workflows, consider using `--latency-wait 60` to account for filesystem delays
+
 ### Using Other Executors
 
 Snakemake v9 supports various executor plugins. Common options include:
@@ -55,6 +68,60 @@ Snakemake v9 supports various executor plugins. Common options include:
 For executor-specific options, refer to the respective executor plugin documentation.
 
 Note: Executor plugins must be installed separately via pip (e.g., `pip install snakemake-executor-plugin-slurm`).
+
+## Troubleshooting
+
+### SLURM Errors
+
+**Error: `'NoneType' object has no attribute 'logdir'`**
+
+This error typically occurs when:
+1. The SLURM executor plugin is not properly installed
+2. The working directory doesn't exist or lacks write permissions
+3. The `.snakemake` directory cannot be created
+
+**Solution:**
+```bash
+# Ensure you're in a writable directory
+cd /path/to/your/workdir
+
+# Make sure the SLURM plugin is installed
+pip install snakemake-executor-plugin-slurm
+
+# Verify the plugin is available
+python -c "from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry; print('slurm' in ExecutorPluginRegistry().plugins)"
+
+# Run the pipeline (it will create .snakemake/log automatically)
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--executor slurm --jobs 100"
+```
+
+**Error: SLURM jobs not submitting**
+
+Check that:
+- You have access to the SLURM partition you're requesting
+- Your account has the necessary permissions
+- Resource requests are within allowed limits
+
+Use `--default-resources` to specify SLURM parameters:
+```bash
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--executor slurm --jobs 100 \
+    --default-resources slurm_account=myaccount slurm_partition=compute mem_mb=4000"
+```
+
+### Workflow Debugging
+
+```bash
+# Dry run to check DAG without submitting
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--dry-run"
+
+# Print DAG for inspection
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--dag | dot -Tpdf > dag.pdf"
+
+# Unlock workflow directory if locked from failed run
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--unlock"
+```
 
 ## Workflow Description
 

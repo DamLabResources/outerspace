@@ -382,6 +382,11 @@ class PipelineCommand(BaseCommand):
         logger.info(f"Additional arguments: {snakemake_args}")
 
         try:
+            # Ensure .snakemake directory exists for logs and metadata
+            snakemake_dir = Path(".snakemake")
+            snakemake_dir.mkdir(exist_ok=True)
+            (snakemake_dir / "log").mkdir(exist_ok=True)
+            
             # Parse configuration and execution settings
             config_dict = self._parse_snakemake_config_dict(snakemake_args)
             cores = self._parse_execution_cores(snakemake_args)
@@ -410,7 +415,7 @@ class PipelineCommand(BaseCommand):
             # Execute with the new API
             logger.info("Starting Snakemake workflow execution")
             with SnakemakeApi(output_settings) as snakemake_api:
-                # Create workflow
+                # Create workflow with explicit workdir (defaults to current directory)
                 workflow_api = snakemake_api.workflow(
                     resource_settings=ResourceSettings(**resource_kwargs),
                     config_settings=ConfigSettings(
@@ -421,6 +426,7 @@ class PipelineCommand(BaseCommand):
                     workflow_settings=WorkflowSettings(),
                     deployment_settings=DeploymentSettings(),
                     snakefile=snakefile_path,
+                    workdir=Path.cwd(),  # Explicitly set working directory
                 )
                 
                 # Create DAG
@@ -428,12 +434,30 @@ class PipelineCommand(BaseCommand):
                     dag_settings=DAGSettings(),
                 )
                 
+                # Get executor-specific settings
+                # For remote executors, the plugin's get_settings method needs to be called
+                executor_settings = None
+                if executor not in ["local", "dryrun", "touch"]:
+                    try:
+                        from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry
+                        executor_plugin = ExecutorPluginRegistry().get_plugin(executor)
+                        # Create a minimal argparse-like object with default values
+                        class ExecutorArgs:
+                            pass
+                        args_obj = ExecutorArgs()
+                        executor_settings = executor_plugin.get_settings(args_obj)
+                        logger.info(f"Loaded executor settings for {executor}")
+                    except Exception as e:
+                        logger.warning(f"Could not load executor settings for {executor}: {e}")
+                        logger.warning("Continuing with default settings...")
+                
                 # Execute workflow
                 dag_api.execute_workflow(
                     executor=executor,
                     execution_settings=ExecutionSettings(),
                     remote_execution_settings=RemoteExecutionSettings(),
                     scheduling_settings=SchedulingSettings(),
+                    executor_settings=executor_settings,
                 )
             
             logger.info("Pipeline completed successfully")
