@@ -23,8 +23,21 @@ from typing import Any, Dict, List, Optional
 from argparse import ArgumentParser
 
 import pulp
-import snakemake
 import yaml
+
+from snakemake.api import SnakemakeApi
+from snakemake.settings.types import (
+    ConfigSettings,
+    DAGSettings,
+    DeploymentSettings,
+    ExecutionSettings,
+    OutputSettings,
+    RemoteExecutionSettings,
+    ResourceSettings,
+    SchedulingSettings,
+    StorageSettings,
+    WorkflowSettings,
+)
 
 from outerspace.cli.commands.base import BaseCommand
 
@@ -229,10 +242,82 @@ class PipelineCommand(BaseCommand):
             "installed or you are running from the repository root."
         )
 
-    def _build_snakemake_argv(
+    def _parse_snakemake_config_dict(
+        self, snakemake_args: List[str]
+    ) -> Dict[str, Any]:
+        """Parse config values from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Dict[str, Any]
+            Dictionary of config values
+        """
+        config = {"toml": self.args.config_file}
+        
+        # Parse --config arguments from snakemake_args
+        i = 0
+        while i < len(snakemake_args):
+            if snakemake_args[i] == "--config":
+                if i + 1 < len(snakemake_args):
+                    # Parse key=value
+                    config_arg = snakemake_args[i + 1]
+                    if "=" in config_arg:
+                        key, value = config_arg.split("=", 1)
+                        config[key] = value
+                    i += 2
+                else:
+                    i += 1
+            else:
+                i += 1
+        
+        return config
+
+    def _parse_execution_cores(self, snakemake_args: List[str]) -> int:
+        """Parse cores/threads from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        int
+            Number of cores to use (default 1)
+        """
+        # Look for --cores, -c, or -j arguments
+        for i, arg in enumerate(snakemake_args):
+            if arg in ["--cores", "-c", "-j"] and i + 1 < len(snakemake_args):
+                try:
+                    return int(snakemake_args[i + 1])
+                except ValueError:
+                    pass
+        return 1
+
+    def _is_dry_run(self, snakemake_args: List[str]) -> bool:
+        """Check if dry-run mode is requested.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        bool
+            True if dry-run is requested
+        """
+        return "--dry-run" in snakemake_args or "-n" in snakemake_args
+
+    def _execute_snakemake(
         self, snakefile_path: Path, snakemake_args: List[str]
-    ) -> List[str]:
-        """Build the argument vector for Snakemake execution.
+    ) -> None:
+        """Execute Snakemake workflow using the new v9 API.
 
         Parameters
         ----------
@@ -241,55 +326,59 @@ class PipelineCommand(BaseCommand):
         snakemake_args : List[str]
             Additional Snakemake arguments from user
 
-        Returns
-        -------
-        List[str]
-            Complete argument list for Snakemake
-        """
-        # Start with the program name and Snakefile
-        new_argv = ["snakemake", "-s", str(snakefile_path)]
-
-        # Add config file if not already specified
-        if "--configfile" not in snakemake_args:
-            new_argv.extend(["--configfile", self.args.snakemake_config])
-
-        # Add remaining arguments
-        new_argv.extend(snakemake_args)
-
-        # Add our config as a config value
-        if "--config" not in snakemake_args:
-            new_argv.extend(["--config", f"toml={self.args.config_file}"])
-
-        return new_argv
-
-    def _execute_snakemake(self, argv: List[str]) -> None:
-        """Execute Snakemake with the given arguments.
-
-        Parameters
-        ----------
-        argv : List[str]
-            Argument vector for Snakemake (including program name)
-
         Raises
         ------
         SystemExit
-            If Snakemake execution fails (exit code != 0)
+            If Snakemake execution fails
         """
-        logger.info(f"Running Snakemake with args: {argv}")
+        logger.info(f"Running Snakemake workflow from: {snakefile_path}")
+        logger.info(f"Additional arguments: {snakemake_args}")
 
         try:
+            # Parse configuration
+            config_dict = self._parse_snakemake_config_dict(snakemake_args)
+            cores = self._parse_execution_cores(snakemake_args)
+            is_dry_run = self._is_dry_run(snakemake_args)
+            
+            # Determine executor
+            executor = "dryrun" if is_dry_run else "local"
+            
+            # Create output settings (use defaults for now)
+            output_settings = OutputSettings()
+            
+            # Execute with the new API
             logger.info("Starting Snakemake workflow execution")
-            snakemake.main(argv[1:])  # Skip the 'snakemake' program name
+            with SnakemakeApi(output_settings) as snakemake_api:
+                # Create workflow
+                workflow_api = snakemake_api.workflow(
+                    resource_settings=ResourceSettings(cores=cores),
+                    config_settings=ConfigSettings(
+                        config=config_dict,
+                        configfiles=[Path(self.args.snakemake_config)],
+                    ),
+                    storage_settings=StorageSettings(),
+                    workflow_settings=WorkflowSettings(),
+                    deployment_settings=DeploymentSettings(),
+                    snakefile=snakefile_path,
+                )
+                
+                # Create DAG
+                dag_api = workflow_api.dag(
+                    dag_settings=DAGSettings(),
+                )
+                
+                # Execute workflow
+                dag_api.execute_workflow(
+                    executor=executor,
+                    execution_settings=ExecutionSettings(),
+                    remote_execution_settings=RemoteExecutionSettings(),
+                    scheduling_settings=SchedulingSettings(),
+                )
+            
             logger.info("Pipeline completed successfully")
 
-        except SystemExit as e:
-            if e.code != 0:
-                logger.error(f"Pipeline failed with exit code {e.code}")
-                sys.exit(1)
-            else:
-                logger.info("Pipeline completed successfully")
         except Exception as e:
-            logger.error(f"Unexpected error during pipeline execution: {e}")
+            logger.error(f"Pipeline execution failed: {e}")
             raise
 
     def run(self) -> None:
@@ -315,20 +404,14 @@ class PipelineCommand(BaseCommand):
         # Load Snakemake config
         snakemake_config = self._load_snakemake_config(self.args.snakemake_config)
 
-        # Prepare Snakemake configuration
-        config = {"toml": self.args.config_file, **snakemake_config}
-
         # Parse additional Snakemake arguments
         snakemake_args = self._parse_snakemake_args(self.args.snakemake_args)
 
         # Locate the Snakefile
         snakefile_path = self._locate_snakefile()
 
-        # Build Snakemake arguments
-        argv = self._build_snakemake_argv(snakefile_path, snakemake_args)
-
         # Execute Snakemake
-        self._execute_snakemake(argv)
+        self._execute_snakemake(snakefile_path, snakemake_args)
 
 
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

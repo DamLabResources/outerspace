@@ -14,7 +14,7 @@ black:
 
 venv:
 	# Create a new conda environment in the venv directory
-	conda create -p ./venv python=3.10 pytest
+	conda create -p ./venv python=3.12 pytest
 	conda run -p ./venv pip install .
 
 files:

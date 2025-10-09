@@ -147,61 +147,50 @@ def test_locate_snakefile_prefers_packaged(tmp_path):
             assert result == packaged_path
 
 
-def test_build_snakemake_argv_basic(mock_pipeline_command, tmp_path):
-    """Test building basic Snakemake argv"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
+def test_parse_snakemake_config_dict_basic(mock_pipeline_command):
+    """Test parsing basic config dictionary"""
+    config = mock_pipeline_command._parse_snakemake_config_dict([])
     
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, [])
-    
-    assert argv[0] == 'snakemake'
-    assert argv[1] == '-s'
-    assert argv[2] == str(snakefile)
-    assert '--configfile' in argv
-    assert 'test_snakemake.yaml' in argv
-    assert '--config' in argv
-    assert 'toml=test_config.toml' in argv
+    assert 'toml' in config
+    assert config['toml'] == 'test_config.toml'
 
 
-def test_build_snakemake_argv_with_user_args(mock_pipeline_command, tmp_path):
-    """Test building Snakemake argv with user arguments"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
+def test_parse_snakemake_config_dict_with_user_config(mock_pipeline_command):
+    """Test parsing config dictionary with user config arguments"""
+    user_args = ['--config', 'custom_key=custom_value', '--other-arg', 'value']
+    config = mock_pipeline_command._parse_snakemake_config_dict(user_args)
     
-    user_args = ['--dry-run', '--cores', '4']
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, user_args)
-    
-    assert '--dry-run' in argv
-    assert '--cores' in argv
-    assert '4' in argv
+    assert 'toml' in config
+    assert config['toml'] == 'test_config.toml'
+    assert 'custom_key' in config
+    assert config['custom_key'] == 'custom_value'
 
 
-def test_build_snakemake_argv_respects_user_configfile(mock_pipeline_command, tmp_path):
-    """Test that user-provided --configfile is not overridden"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
-    
-    user_args = ['--configfile', 'custom.yaml']
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, user_args)
-    
-    # Should only have one --configfile (the user's)
-    configfile_count = argv.count('--configfile')
-    assert configfile_count == 1
-    configfile_idx = argv.index('--configfile')
-    assert argv[configfile_idx + 1] == 'custom.yaml'
+def test_parse_execution_cores_default():
+    """Test default cores parsing"""
+    cmd = PipelineCommand()
+    cores = cmd._parse_execution_cores([])
+    assert cores == 1
 
 
-def test_build_snakemake_argv_respects_user_config(mock_pipeline_command, tmp_path):
-    """Test that user-provided --config is not overridden"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
-    
-    user_args = ['--config', 'custom_key=custom_value']
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, user_args)
-    
-    # Should only have one --config (the user's)
-    config_count = argv.count('--config')
-    assert config_count == 1
+def test_parse_execution_cores_with_cores_flag():
+    """Test cores parsing with --cores flag"""
+    cmd = PipelineCommand()
+    cores = cmd._parse_execution_cores(['--cores', '4'])
+    assert cores == 4
+
+
+def test_is_dry_run_false():
+    """Test dry-run detection when not set"""
+    cmd = PipelineCommand()
+    assert cmd._is_dry_run([]) is False
+
+
+def test_is_dry_run_true():
+    """Test dry-run detection when set"""
+    cmd = PipelineCommand()
+    assert cmd._is_dry_run(['--dry-run']) is True
+    assert cmd._is_dry_run(['-n']) is True
 
 
 def test_parse_snakemake_args_empty():
@@ -228,41 +217,106 @@ def test_parse_snakemake_args_with_quotes():
     assert result == ['--config', 'key=value with spaces']
 
 
-def test_execute_snakemake_success():
+def test_execute_snakemake_success(tmp_path):
     """Test successful Snakemake execution"""
     cmd = PipelineCommand()
+    cmd.args = Mock()
     
-    with patch('outerspace.cli.commands.pipeline.snakemake.main') as mock_snakemake:
-        # Mock successful execution (no exception)
-        mock_snakemake.return_value = None
-        
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Mock the new Snakemake v9 API
+    mock_dag_api = MagicMock()
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
         # Should not raise
-        cmd._execute_snakemake(['snakemake', '--help'])
-        mock_snakemake.assert_called_once_with(['--help'])
+        cmd._execute_snakemake(snakefile, [])
+        
+        # Verify API was called correctly
+        mock_snakemake_api.workflow.assert_called_once()
+        mock_workflow_api.dag.assert_called_once()
+        mock_dag_api.execute_workflow.assert_called_once()
 
 
-def test_execute_snakemake_failure():
+def test_execute_snakemake_failure(tmp_path):
     """Test failed Snakemake execution"""
     cmd = PipelineCommand()
+    cmd.args = Mock()
     
-    with patch('outerspace.cli.commands.pipeline.snakemake.main') as mock_snakemake:
-        # Mock failed execution
-        mock_snakemake.side_effect = SystemExit(1)
-        
-        with pytest.raises(SystemExit):
-            cmd._execute_snakemake(['snakemake', '--help'])
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Mock the new Snakemake v9 API with failure
+    mock_dag_api = MagicMock()
+    mock_dag_api.execute_workflow.side_effect = Exception("Workflow failed")
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
+        with pytest.raises(Exception, match="Workflow failed"):
+            cmd._execute_snakemake(snakefile, [])
 
 
-def test_execute_snakemake_success_exit():
-    """Test Snakemake execution with SystemExit(0)"""
+def test_execute_snakemake_success_exit(tmp_path):
+    """Test Snakemake execution completes successfully"""
     cmd = PipelineCommand()
+    cmd.args = Mock()
     
-    with patch('outerspace.cli.commands.pipeline.snakemake.main') as mock_snakemake:
-        # Mock successful exit
-        mock_snakemake.side_effect = SystemExit(0)
-        
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Mock the new Snakemake v9 API
+    mock_dag_api = MagicMock()
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
         # Should not raise
-        cmd._execute_snakemake(['snakemake', '--help'])
+        cmd._execute_snakemake(snakefile, [])
+        
+        # Verify execution happened
+        mock_dag_api.execute_workflow.assert_called_once()
 
 
 @pytest.mark.integration
