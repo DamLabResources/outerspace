@@ -14,8 +14,47 @@ The `outerspace pipeline` command provides a thin wrapper around Snakemake to ru
 The command automatically:
 - Loads and merges configurations
 - Sets up the Snakemake environment
-- Handles additional Snakemake arguments
+- Handles additional Snakemake arguments (including executor selection)
 - Provides proper error handling and logging
+
+### Basic Usage
+
+```bash
+# Local execution with 4 cores
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--cores 4"
+
+# Dry run to test the workflow
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--dry-run"
+```
+
+### Using SLURM Executor
+
+To run the pipeline on a SLURM cluster, you need to:
+
+1. Install the SLURM executor plugin:
+   ```bash
+   pip install snakemake-executor-plugin-slurm
+   ```
+
+2. Run with the SLURM executor:
+   ```bash
+   outerspace pipeline config.toml snakemake_config.yaml \
+       --snakemake-args="--executor slurm --jobs 100"
+   ```
+
+### Using Other Executors
+
+Snakemake v9 supports various executor plugins. Common options include:
+
+- **Local**: `--executor local --cores 8` (default, runs on local machine)
+- **SLURM**: `--executor slurm --jobs 100` (SLURM cluster)
+- **LSF**: `--executor lsf --jobs 100` (IBM LSF cluster)
+- **Grid Engine**: `--executor cluster-generic --jobs 100` (SGE/UGE)
+- **Google Cloud**: `--executor googlebatch --jobs 100`
+
+For executor-specific options, refer to the respective executor plugin documentation.
+
+Note: Executor plugins must be installed separately via pip (e.g., `pip install snakemake-executor-plugin-slurm`).
 
 ## Workflow Description
 
@@ -73,9 +112,9 @@ Each wrapper corresponds to a CLI command:
 
 The wrappers are located in `workflow/wrappers/` and can be customized for specific cluster environments or requirements.
 
-### Using Wrappers
+### Using Wrapper Scripts
 
-Wrappers are referenced in the Snakefile using the `wrapper` directive:
+Wrapper scripts are referenced in the Snakefile using the `script` directive:
 
 ```python
 rule findseq:
@@ -84,8 +123,8 @@ rule findseq:
         toml = get_toml_file
     output:
         'findseq/{sample}.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/findseq'
+    script:
+        'wrappers/findseq/wrapper.py'
 ```
 
 This approach allows for:
@@ -93,6 +132,8 @@ This approach allows for:
 - Consistent execution across environments
 - Simple integration with cluster schedulers
 - Reproducible analysis workflows
+
+**Note**: In Snakemake v9, the `script:` directive is used for local Python scripts, while `wrapper:` is reserved for remote wrappers from the Snakemake wrapper repository.
 
 
 Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

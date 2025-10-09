@@ -170,7 +170,7 @@ def test_parse_execution_cores_default():
     """Test default cores parsing"""
     cmd = PipelineCommand()
     cores = cmd._parse_execution_cores([])
-    assert cores == 1
+    assert cores is None
 
 
 def test_parse_execution_cores_with_cores_flag():
@@ -178,6 +178,41 @@ def test_parse_execution_cores_with_cores_flag():
     cmd = PipelineCommand()
     cores = cmd._parse_execution_cores(['--cores', '4'])
     assert cores == 4
+
+
+def test_parse_jobs_default():
+    """Test default jobs parsing"""
+    cmd = PipelineCommand()
+    jobs = cmd._parse_jobs([])
+    assert jobs is None
+
+
+def test_parse_jobs_with_jobs_flag():
+    """Test jobs parsing with --jobs flag"""
+    cmd = PipelineCommand()
+    jobs = cmd._parse_jobs(['--jobs', '10'])
+    assert jobs == 10
+
+
+def test_parse_executor_default():
+    """Test default executor is local"""
+    cmd = PipelineCommand()
+    executor = cmd._parse_executor([])
+    assert executor == "local"
+
+
+def test_parse_executor_slurm():
+    """Test parsing SLURM executor"""
+    cmd = PipelineCommand()
+    executor = cmd._parse_executor(['--executor', 'slurm'])
+    assert executor == "slurm"
+
+
+def test_parse_executor_dryrun_overrides():
+    """Test that dry-run overrides explicit executor"""
+    cmd = PipelineCommand()
+    executor = cmd._parse_executor(['--executor', 'slurm', '--dry-run'])
+    assert executor == "dryrun"
 
 
 def test_is_dry_run_false():

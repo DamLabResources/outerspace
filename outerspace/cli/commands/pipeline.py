@@ -277,7 +277,7 @@ class PipelineCommand(BaseCommand):
         
         return config
 
-    def _parse_execution_cores(self, snakemake_args: List[str]) -> int:
+    def _parse_execution_cores(self, snakemake_args: List[str]) -> Optional[int]:
         """Parse cores/threads from snakemake arguments.
 
         Parameters
@@ -287,17 +287,64 @@ class PipelineCommand(BaseCommand):
 
         Returns
         -------
-        int
-            Number of cores to use (default 1)
+        Optional[int]
+            Number of cores to use, or None if not specified
         """
-        # Look for --cores, -c, or -j arguments
+        # Look for --cores or -c arguments
         for i, arg in enumerate(snakemake_args):
-            if arg in ["--cores", "-c", "-j"] and i + 1 < len(snakemake_args):
+            if arg in ["--cores", "-c"] and i + 1 < len(snakemake_args):
                 try:
                     return int(snakemake_args[i + 1])
                 except ValueError:
                     pass
-        return 1
+        return None
+
+    def _parse_jobs(self, snakemake_args: List[str]) -> Optional[int]:
+        """Parse jobs/nodes from snakemake arguments for remote execution.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Optional[int]
+            Number of jobs/nodes to use, or None if not specified
+        """
+        # Look for --jobs or -j arguments
+        for i, arg in enumerate(snakemake_args):
+            if arg in ["--jobs", "-j"] and i + 1 < len(snakemake_args):
+                try:
+                    return int(snakemake_args[i + 1])
+                except ValueError:
+                    pass
+        return None
+
+    def _parse_executor(self, snakemake_args: List[str]) -> str:
+        """Parse executor from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        str
+            Executor name (e.g., 'local', 'slurm', 'dryrun')
+        """
+        # Check for dry-run first (highest priority)
+        if "--dry-run" in snakemake_args or "-n" in snakemake_args:
+            return "dryrun"
+        
+        # Look for --executor argument
+        for i, arg in enumerate(snakemake_args):
+            if arg == "--executor" and i + 1 < len(snakemake_args):
+                return snakemake_args[i + 1]
+        
+        # Default to local executor
+        return "local"
 
     def _is_dry_run(self, snakemake_args: List[str]) -> bool:
         """Check if dry-run mode is requested.
@@ -335,13 +382,27 @@ class PipelineCommand(BaseCommand):
         logger.info(f"Additional arguments: {snakemake_args}")
 
         try:
-            # Parse configuration
+            # Parse configuration and execution settings
             config_dict = self._parse_snakemake_config_dict(snakemake_args)
             cores = self._parse_execution_cores(snakemake_args)
-            is_dry_run = self._is_dry_run(snakemake_args)
+            jobs = self._parse_jobs(snakemake_args)
+            executor = self._parse_executor(snakemake_args)
             
-            # Determine executor
-            executor = "dryrun" if is_dry_run else "local"
+            # Configure resource settings based on executor type
+            # For local/dryrun: use cores
+            # For remote executors (slurm, etc.): use nodes (jobs) and optionally cores
+            resource_kwargs = {}
+            if executor in ["local", "dryrun"]:
+                # Local execution: cores is required
+                resource_kwargs["cores"] = cores if cores is not None else 1
+            else:
+                # Remote execution: nodes (jobs) is primary, cores can be per-node
+                resource_kwargs["nodes"] = jobs if jobs is not None else 1
+                if cores is not None:
+                    resource_kwargs["cores"] = cores
+            
+            logger.info(f"Executor: {executor}")
+            logger.info(f"Resource settings: {resource_kwargs}")
             
             # Create output settings (use defaults for now)
             output_settings = OutputSettings()
@@ -351,7 +412,7 @@ class PipelineCommand(BaseCommand):
             with SnakemakeApi(output_settings) as snakemake_api:
                 # Create workflow
                 workflow_api = snakemake_api.workflow(
-                    resource_settings=ResourceSettings(cores=cores),
+                    resource_settings=ResourceSettings(**resource_kwargs),
                     config_settings=ConfigSettings(
                         config=config_dict,
                         configfiles=[Path(self.args.snakemake_config)],
