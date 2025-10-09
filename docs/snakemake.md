@@ -81,11 +81,21 @@ slurm_qos: normal
 # Resource defaults (applied to all jobs unless overridden)
 # IMPORTANT: These are crucial for SLURM execution
 # The slurm_account is often REQUIRED by cluster configurations
+# You can use either list format (shown here) or dict format (see below)
 default-resources:
   - slurm_account=myproject      # REQUIRED for most SLURM clusters
   - slurm_partition=compute      # Which partition to submit to
   - mem_mb=4000                  # Default memory per job
   - runtime=120                  # Default runtime in minutes
+```
+
+**Alternative dict format** (both formats are supported):
+```yaml
+default-resources:
+  slurm_account: myproject
+  slurm_partition: compute
+  mem_mb: 4000
+  runtime: 120
 ```
 
 **Using a Profile:**

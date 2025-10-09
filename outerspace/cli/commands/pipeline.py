@@ -419,17 +419,26 @@ class PipelineCommand(BaseCommand):
             DefaultResources object if default-resources found in profile, None otherwise
         """
         # Check for both 'default-resources' and 'default_resources' keys
-        default_resources_list = profile_config.get("default-resources") or profile_config.get("default_resources")
+        default_resources_raw = profile_config.get("default-resources") or profile_config.get("default_resources")
         
-        if not default_resources_list:
+        if not default_resources_raw:
             return None
         
-        # Convert to list if it's a single string
-        if isinstance(default_resources_list, str):
-            default_resources_list = [default_resources_list]
+        # Convert to list format (key=value strings)
+        default_resources_list = []
         
-        if not isinstance(default_resources_list, list):
-            logger.warning(f"default-resources must be a list, got {type(default_resources_list)}")
+        if isinstance(default_resources_raw, str):
+            # Single string: convert to list
+            default_resources_list = [default_resources_raw]
+        elif isinstance(default_resources_raw, list):
+            # Already a list: use as-is
+            default_resources_list = default_resources_raw
+        elif isinstance(default_resources_raw, dict):
+            # Dictionary: convert to list of key=value strings
+            default_resources_list = [f"{key}={value}" for key, value in default_resources_raw.items()]
+            logger.debug(f"Converted dict to list format: {default_resources_list}")
+        else:
+            logger.warning(f"default-resources must be a list, dict, or string, got {type(default_resources_raw)}")
             return None
         
         try:

@@ -320,11 +320,30 @@ def test_parse_default_resources_single_string():
     assert "mem_mb=4000" in result.args
 
 
+def test_parse_default_resources_dict():
+    """Test parsing default resources from dict (YAML alternative format)"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": {
+            "mem_mb": 4000,
+            "runtime": 120,
+            "slurm_account": "myaccount"
+        }
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    # Dict order may vary, so check each item is present
+    assert any("mem_mb=4000" in arg for arg in result.args)
+    assert any("runtime=120" in arg for arg in result.args)
+    assert any("slurm_account=myaccount" in arg for arg in result.args)
+
+
 def test_parse_default_resources_invalid_type():
     """Test parsing default resources with invalid type"""
     cmd = PipelineCommand()
     profile_config = {
-        "default-resources": {"mem_mb": 4000}  # Wrong type
+        "default-resources": 12345  # Wrong type (int)
     }
     
     result = cmd._parse_default_resources(profile_config)
