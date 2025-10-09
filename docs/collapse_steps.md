@@ -24,8 +24,9 @@ allowed_list = "allowed_values.txt"
 
 ## Usage
 
-When steps are defined in the config, use the `collapse` command with `--input-dir` and `--output-dir`:
+When steps are defined in the config, use the `collapse` command with either single file or batch processing:
 
+**Batch processing** (multiple files):
 ```bash
 outerspace collapse \
   --config my_config.toml \
@@ -33,11 +34,19 @@ outerspace collapse \
   --output-dir final_output/
 ```
 
+**Single file processing**:
+```bash
+outerspace collapse \
+  --config my_config.toml \
+  --input-file input_data/sample.csv \
+  --output-file final_output/sample.csv
+```
+
 The command will:
 1. Execute each step in sequence
-2. Use temporary directories for intermediate results
-3. Clean up temp directories automatically
-4. Place final results in `--output-dir`
+2. Use temporary directories (batch) or temporary files (single file) for intermediate results
+3. Clean up temp paths automatically
+4. Place final results in the specified output location
 
 ## Example: UMI + Protospacer Correction
 

@@ -698,4 +698,80 @@ min_score = 0
             assert rescued, "key2 should have been found and rescued to key1"
 
 
+def test_collapse_with_steps_single_file():
+    """Test collapse with iterative steps from config in single file mode"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create single input file (not in a directory)
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,UMI_5prime,UMI_3prime\n")
+            f.write("key1,AAAA,CCCC\n")
+            f.write("key1,AAAT,CCCC\n")  # 1 mismatch in UMI
+            f.write("key2,GGGG,TTTT\n")  # Near-miss for key1 (1 mismatch)
+            f.write("other,TTTT,AAAA\n")
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+            f.write("other\n")
+
+        # Create config file with steps
+        config_file = os.path.join(temp_dir, "config.toml")
+        with open(config_file, "w") as f:
+            f.write("""
+[[collapse.steps]]
+name = "umi_correction"
+columns = "UMI_5prime,UMI_3prime"
+method = "directional"
+mismatches = 1
+
+[[collapse.steps]]
+name = "protospacer_correction"
+columns = "protospacer"
+method = "nearest"
+allowed_list = "allowed.txt"
+mismatch_penalty = -1
+gap_penalty = -3
+match_score = 1
+min_score = 0
+""")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "collapse",
+            "--config",
+            config_file,
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        # Verify output file exists
+        assert os.path.exists(output_file)
+        
+        with open(output_file, "r") as f:
+            content = f.read()
+            # Should have both corrected columns
+            assert "UMI_5prime_UMI_3prime_corrected" in content
+            assert "protospacer_corrected" in content
+            # key2 should be rescued to key1
+            lines = content.strip().split("\n")
+            rescued = False
+            for line in lines[1:]:  # Skip header
+                if "key2," in line:
+                    # Check that the corrected column has key1
+                    parts = line.split(",")
+                    # Last column should be protospacer_corrected
+                    if len(parts) > 4:
+                        assert parts[-1] == "key1", f"Expected key2 to be rescued to key1, but got {parts[-1]}"
+                        rescued = True
+            assert rescued, "key2 should have been found and rescued to key1"
+
+
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
