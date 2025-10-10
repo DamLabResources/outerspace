@@ -28,6 +28,10 @@ if read2_file:
     args.extend(['-2', read2_file])
 args.extend(['-o', output_file])
 
+# Add threads if specified
+if hasattr(snakemake, 'threads') and snakemake.threads:
+    args.extend(['--threads', str(snakemake.threads)])
+
 # Run the findseq command
 cli = Cli(args)
 cli.run() 
