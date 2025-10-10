@@ -14,8 +14,181 @@ The `outerspace pipeline` command provides a thin wrapper around Snakemake to ru
 The command automatically:
 - Loads and merges configurations
 - Sets up the Snakemake environment
-- Handles additional Snakemake arguments
+- Handles additional Snakemake arguments (including executor selection)
 - Provides proper error handling and logging
+
+### Basic Usage
+
+```bash
+# Local execution with 4 cores
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--cores 4"
+
+# Dry run to test the workflow
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--dry-run"
+```
+
+### Using SLURM Executor
+
+To run the pipeline on a SLURM cluster, you need to:
+
+1. Install the SLURM executor plugin:
+   ```bash
+   pip install snakemake-executor-plugin-slurm
+   ```
+
+2. Run with the SLURM executor:
+   ```bash
+   outerspace pipeline config.toml snakemake_config.yaml \
+       --snakemake-args="--executor slurm --jobs 100"
+   ```
+
+3. (Optional) Specify SLURM-specific resources:
+   ```bash
+   outerspace pipeline config.toml snakemake_config.yaml \
+       --snakemake-args="--executor slurm --jobs 100 \
+       --default-resources slurm_account=myaccount slurm_partition=compute"
+   ```
+
+**Important Notes:**
+- The pipeline automatically creates a `.snakemake/log` directory for SLURM logs
+- SLURM job logs will be written to `.snakemake/log/` by default
+- Make sure you have sufficient permissions in the working directory
+- For large workflows, consider using `--latency-wait 60` to account for filesystem delays
+
+### Using Profiles
+
+Snakemake profiles allow you to store commonly-used settings in a configuration file, making it easier to run workflows consistently.
+
+**Creating a Profile:**
+
+Create a directory for your profile with a `config.yaml` or `config.v8+.yaml` file:
+
+```bash
+mkdir -p profiles/slurm
+```
+
+Create `profiles/slurm/config.v8+.yaml`:
+```yaml
+# Executor settings
+executor: slurm
+jobs: 100
+
+# SLURM-specific settings (passed to the executor plugin)
+slurm_partition: compute
+slurm_account: myproject
+slurm_qos: normal
+
+# Resource defaults (applied to all jobs unless overridden)
+# IMPORTANT: These are crucial for SLURM execution
+# The slurm_account is often REQUIRED by cluster configurations
+# You can use either list format (shown here) or dict format (see below)
+default-resources:
+  - slurm_account=myproject      # REQUIRED for most SLURM clusters
+  - slurm_partition=compute      # Which partition to submit to
+  - mem_mb=4000                  # Default memory per job
+  - runtime=120                  # Default runtime in minutes
+```
+
+**Alternative dict format** (both formats are supported):
+```yaml
+default-resources:
+  slurm_account: myproject
+  slurm_partition: compute
+  mem_mb: 4000
+  runtime: 120
+```
+
+**Using a Profile:**
+
+```bash
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--profile profiles/slurm"
+```
+
+**Profile Priority:**
+
+Settings are applied in this order (later overrides earlier):
+1. Profile settings
+2. Command-line arguments
+
+For example, this will use the profile but override jobs:
+```bash
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--profile profiles/slurm --jobs 200"
+```
+
+### Using Other Executors
+
+Snakemake v9 supports various executor plugins. Common options include:
+
+- **Local**: `--executor local --cores 8` (default, runs on local machine)
+- **SLURM**: `--executor slurm --jobs 100` (SLURM cluster)
+- **LSF**: `--executor lsf --jobs 100` (IBM LSF cluster)
+- **Grid Engine**: `--executor cluster-generic --jobs 100` (SGE/UGE)
+- **Google Cloud**: `--executor googlebatch --jobs 100`
+
+For executor-specific options, refer to the respective executor plugin documentation.
+
+Note: Executor plugins must be installed separately via pip (e.g., `pip install snakemake-executor-plugin-slurm`).
+
+## Troubleshooting
+
+### SLURM Errors
+
+**Error: `'NoneType' object has no attribute 'logdir'` or `'ExecutorArgs' object has no attribute 'slurm_logdir'`**
+
+These errors occur when executor-specific settings cannot be properly initialized. This has been fixed in the latest version.
+
+**Solution:**
+```bash
+# Ensure you're in a writable directory
+cd /path/to/your/workdir
+
+# Make sure the SLURM plugin is installed
+pip install snakemake-executor-plugin-slurm
+
+# Verify the plugin is available
+python -c "from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry; print('slurm' in ExecutorPluginRegistry().plugins)"
+
+# Run the pipeline (it will create .snakemake/log automatically and configure executor settings)
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--executor slurm --jobs 100"
+```
+
+**What the pipeline does automatically:**
+- Creates `.snakemake/log` directory for SLURM job logs
+- Initializes executor-specific settings with sensible defaults
+- Sets `slurm_logdir` to `.snakemake/log`
+- Configures other SLURM parameters to their defaults
+
+**Error: SLURM jobs not submitting**
+
+Check that:
+- You have access to the SLURM partition you're requesting
+- Your account has the necessary permissions
+- Resource requests are within allowed limits
+
+**Option 1: Use command-line arguments**
+```bash
+outerspace pipeline config.toml snakemake_config.yaml \
+    --snakemake-args="--executor slurm --jobs 100 \
+    --default-resources slurm_account=myaccount slurm_partition=compute mem_mb=4000"
+```
+
+**Option 2: Use a profile (recommended)** - Create a profile with `default-resources` as shown in the "Using Profiles" section above. The pipeline will automatically parse and apply these settings to all jobs.
+
+### Workflow Debugging
+
+```bash
+# Dry run to check DAG without submitting
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--dry-run"
+
+# Print DAG for inspection
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--dag | dot -Tpdf > dag.pdf"
+
+# Unlock workflow directory if locked from failed run
+outerspace pipeline config.toml snakemake_config.yaml --snakemake-args="--unlock"
+```
 
 ## Workflow Description
 
@@ -73,9 +246,9 @@ Each wrapper corresponds to a CLI command:
 
 The wrappers are located in `workflow/wrappers/` and can be customized for specific cluster environments or requirements.
 
-### Using Wrappers
+### Using Wrapper Scripts
 
-Wrappers are referenced in the Snakefile using the `wrapper` directive:
+Wrapper scripts are referenced in the Snakefile using the `script` directive:
 
 ```python
 rule findseq:
@@ -84,8 +257,8 @@ rule findseq:
         toml = get_toml_file
     output:
         'findseq/{sample}.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/findseq'
+    script:
+        'wrappers/findseq/wrapper.py'
 ```
 
 This approach allows for:
@@ -93,6 +266,8 @@ This approach allows for:
 - Consistent execution across environments
 - Simple integration with cluster schedulers
 - Reproducible analysis workflows
+
+**Note**: In Snakemake v9, the `script:` directive is used for local Python scripts, while `wrapper:` is reserved for remote wrappers from the Snakemake wrapper repository.
 
 
 Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

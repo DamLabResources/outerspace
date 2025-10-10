@@ -1,8 +1,6 @@
 import pandas as pd
 from pathlib import Path
 
-WORKFLOW_DIR = Path(workflow.snakefile).parent
-
 # Use config file from snakemake config if provided, otherwise use default
 configfile: config.get('config_file', 'config.yaml')
 
@@ -77,8 +75,8 @@ rule findseq:
         toml = get_toml_file
     output:
         'findseq/{sample}.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/findseq'
+    script:
+        'wrappers/findseq/wrapper.py'
 
 
 rule count:
@@ -87,8 +85,8 @@ rule count:
         toml = get_toml_file
     output:
         'count/{sample}.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/count'
+    script:
+        'wrappers/count/wrapper.py'
 
 rule collapse:
     input:
@@ -96,8 +94,8 @@ rule collapse:
         toml = get_toml_file
     output:
         'collapse/{sample}.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/collapse'
+    script:
+        'wrappers/collapse/wrapper.py'
 
 
 rule merge:
@@ -107,8 +105,8 @@ rule merge:
         toml = get_toml_file
     output:
         'merge/merged.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/merge'
+    script:
+        'wrappers/merge/wrapper.py'
 
 
 rule stats:
@@ -118,5 +116,5 @@ rule stats:
         toml = get_toml_file
     output:
         'stats/stats.csv'
-    wrapper:
-        f'file:{WORKFLOW_DIR}/wrappers/stats'
+    script:
+        'wrappers/stats/wrapper.py'

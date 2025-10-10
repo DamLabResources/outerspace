@@ -317,18 +317,32 @@ While configuration files are recommended for reproducible analyses, you can ove
 
 ## Single File Processing vs Batch Processing
 
-**Batch processing** (recommended):
-- Use `--input-dir` and `--output-dir` for iterative steps
+The `[[collapse.steps]]` feature works with both single file and batch processing modes:
+
+**Batch processing** (recommended for multiple samples):
+- Use `--input-dir` and `--output-dir`
 - Processes all CSV files in the directory
-- Required for `[[collapse.steps]]` mode
+- Great for processing multiple samples at once
+
+```bash
+# Batch mode with iterative steps
+outerspace collapse -c grnaquery.toml \
+    --input-dir results/findseq/ \
+    --output-dir results/collapsed/
+```
 
 **Single file processing**:
 - Use `--input-file` and `--output-file`
-- Not compatible with `[[collapse.steps]]`
-- Requires a config without steps defined, or use command-line args:
+- Also works with `[[collapse.steps]]` for a single sample
+- Intermediate results are stored in temporary files and cleaned up automatically
 
 ```bash
-# Single file workflow (without iterative steps)
+# Single file mode with iterative steps
+outerspace collapse -c grnaquery.toml \
+    --input-file results/findseq/shuffle.csv \
+    --output-file results/collapsed/shuffle.csv
+
+# Or single file without steps (manual step-by-step)
 outerspace collapse \
     --input-file results/findseq/shuffle.csv \
     --output-file results/umi_corrected.csv \
@@ -337,7 +351,7 @@ outerspace collapse \
     --method directional
 ```
 
-For the full iterative workflow, use batch mode with `[[collapse.steps]]` in your config.
+Both modes benefit from the iterative workflow defined in your config file.
 
 ## Understanding the Results
 

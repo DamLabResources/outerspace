@@ -23,8 +23,22 @@ from typing import Any, Dict, List, Optional
 from argparse import ArgumentParser
 
 import pulp
-import snakemake
 import yaml
+
+from snakemake.api import SnakemakeApi
+from snakemake.resources import DefaultResources
+from snakemake.settings.types import (
+    ConfigSettings,
+    DAGSettings,
+    DeploymentSettings,
+    ExecutionSettings,
+    OutputSettings,
+    RemoteExecutionSettings,
+    ResourceSettings,
+    SchedulingSettings,
+    StorageSettings,
+    WorkflowSettings,
+)
 
 from outerspace.cli.commands.base import BaseCommand
 
@@ -229,10 +243,231 @@ class PipelineCommand(BaseCommand):
             "installed or you are running from the repository root."
         )
 
-    def _build_snakemake_argv(
+    def _parse_snakemake_config_dict(
+        self, snakemake_args: List[str]
+    ) -> Dict[str, Any]:
+        """Parse config values from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Dict[str, Any]
+            Dictionary of config values
+        """
+        config = {"toml": self.args.config_file}
+        
+        # Parse --config arguments from snakemake_args
+        i = 0
+        while i < len(snakemake_args):
+            if snakemake_args[i] == "--config":
+                if i + 1 < len(snakemake_args):
+                    # Parse key=value
+                    config_arg = snakemake_args[i + 1]
+                    if "=" in config_arg:
+                        key, value = config_arg.split("=", 1)
+                        config[key] = value
+                    i += 2
+                else:
+                    i += 1
+            else:
+                i += 1
+        
+        return config
+
+    def _parse_execution_cores(self, snakemake_args: List[str]) -> Optional[int]:
+        """Parse cores/threads from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Optional[int]
+            Number of cores to use, or None if not specified
+        """
+        # Look for --cores or -c arguments
+        for i, arg in enumerate(snakemake_args):
+            if arg in ["--cores", "-c"] and i + 1 < len(snakemake_args):
+                try:
+                    return int(snakemake_args[i + 1])
+                except ValueError:
+                    pass
+        return None
+
+    def _parse_jobs(self, snakemake_args: List[str]) -> Optional[int]:
+        """Parse jobs/nodes from snakemake arguments for remote execution.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Optional[int]
+            Number of jobs/nodes to use, or None if not specified
+        """
+        # Look for --jobs or -j arguments
+        for i, arg in enumerate(snakemake_args):
+            if arg in ["--jobs", "-j"] and i + 1 < len(snakemake_args):
+                try:
+                    return int(snakemake_args[i + 1])
+                except ValueError:
+                    pass
+        return None
+
+    def _parse_executor(self, snakemake_args: List[str]) -> str:
+        """Parse executor from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        str
+            Executor name (e.g., 'local', 'slurm', 'dryrun')
+        """
+        # Check for dry-run first (highest priority)
+        if "--dry-run" in snakemake_args or "-n" in snakemake_args:
+            return "dryrun"
+        
+        # Look for --executor argument
+        for i, arg in enumerate(snakemake_args):
+            if arg == "--executor" and i + 1 < len(snakemake_args):
+                return snakemake_args[i + 1]
+        
+        # Default to local executor
+        return "local"
+
+    def _parse_profile(self, snakemake_args: List[str]) -> Optional[Path]:
+        """Parse profile path from snakemake arguments.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        Optional[Path]
+            Path to profile directory, or None if not specified
+        """
+        # Look for --profile argument
+        for i, arg in enumerate(snakemake_args):
+            if arg == "--profile" and i + 1 < len(snakemake_args):
+                profile_path = Path(snakemake_args[i + 1])
+                if profile_path.exists():
+                    return profile_path
+                else:
+                    logger.warning(f"Profile directory not found: {profile_path}")
+                    return None
+        return None
+
+    def _load_profile_config(self, profile_path: Path) -> Dict[str, Any]:
+        """Load configuration from a Snakemake profile directory.
+
+        Parameters
+        ----------
+        profile_path : Path
+            Path to the profile directory
+
+        Returns
+        -------
+        Dict[str, Any]
+            Profile configuration dictionary
+        """
+        # Try different config file names (v8+ first, then default)
+        config_files = [
+            profile_path / "config.v8+.yaml",
+            profile_path / "config.v8+.yml",
+            profile_path / "config.yaml",
+            profile_path / "config.yml",
+        ]
+        
+        for config_file in config_files:
+            if config_file.exists():
+                logger.info(f"Loading profile config from: {config_file}")
+                try:
+                    with open(config_file, "r") as f:
+                        profile_config = yaml.safe_load(f)
+                        return profile_config if profile_config else {}
+                except Exception as e:
+                    logger.warning(f"Failed to load profile config from {config_file}: {e}")
+        
+        logger.warning(f"No config file found in profile directory: {profile_path}")
+        return {}
+
+    def _parse_default_resources(self, profile_config: Dict[str, Any]) -> Optional[DefaultResources]:
+        """Parse default resources from profile configuration.
+
+        Parameters
+        ----------
+        profile_config : Dict[str, Any]
+            Profile configuration dictionary
+
+        Returns
+        -------
+        Optional[DefaultResources]
+            DefaultResources object if default-resources found in profile, None otherwise
+        """
+        # Check for both 'default-resources' and 'default_resources' keys
+        default_resources_raw = profile_config.get("default-resources") or profile_config.get("default_resources")
+        
+        if not default_resources_raw:
+            return None
+        
+        # Convert to list format (key=value strings)
+        default_resources_list = []
+        
+        if isinstance(default_resources_raw, str):
+            # Single string: convert to list
+            default_resources_list = [default_resources_raw]
+        elif isinstance(default_resources_raw, list):
+            # Already a list: use as-is
+            default_resources_list = default_resources_raw
+        elif isinstance(default_resources_raw, dict):
+            # Dictionary: convert to list of key=value strings
+            default_resources_list = [f"{key}={value}" for key, value in default_resources_raw.items()]
+            logger.debug(f"Converted dict to list format: {default_resources_list}")
+        else:
+            logger.warning(f"default-resources must be a list, dict, or string, got {type(default_resources_raw)}")
+            return None
+        
+        try:
+            default_resources = DefaultResources(args=default_resources_list)
+            logger.info(f"Loaded default resources from profile: {default_resources_list}")
+            return default_resources
+        except Exception as e:
+            logger.warning(f"Failed to parse default-resources: {e}")
+            return None
+
+    def _is_dry_run(self, snakemake_args: List[str]) -> bool:
+        """Check if dry-run mode is requested.
+
+        Parameters
+        ----------
+        snakemake_args : List[str]
+            Additional Snakemake arguments from user
+
+        Returns
+        -------
+        bool
+            True if dry-run is requested
+        """
+        return "--dry-run" in snakemake_args or "-n" in snakemake_args
+
+    def _execute_snakemake(
         self, snakefile_path: Path, snakemake_args: List[str]
-    ) -> List[str]:
-        """Build the argument vector for Snakemake execution.
+    ) -> None:
+        """Execute Snakemake workflow using the new v9 API.
 
         Parameters
         ----------
@@ -241,55 +476,156 @@ class PipelineCommand(BaseCommand):
         snakemake_args : List[str]
             Additional Snakemake arguments from user
 
-        Returns
-        -------
-        List[str]
-            Complete argument list for Snakemake
-        """
-        # Start with the program name and Snakefile
-        new_argv = ["snakemake", "-s", str(snakefile_path)]
-
-        # Add config file if not already specified
-        if "--configfile" not in snakemake_args:
-            new_argv.extend(["--configfile", self.args.snakemake_config])
-
-        # Add remaining arguments
-        new_argv.extend(snakemake_args)
-
-        # Add our config as a config value
-        if "--config" not in snakemake_args:
-            new_argv.extend(["--config", f"toml={self.args.config_file}"])
-
-        return new_argv
-
-    def _execute_snakemake(self, argv: List[str]) -> None:
-        """Execute Snakemake with the given arguments.
-
-        Parameters
-        ----------
-        argv : List[str]
-            Argument vector for Snakemake (including program name)
-
         Raises
         ------
         SystemExit
-            If Snakemake execution fails (exit code != 0)
+            If Snakemake execution fails
         """
-        logger.info(f"Running Snakemake with args: {argv}")
+        logger.info(f"Running Snakemake workflow from: {snakefile_path}")
+        logger.info(f"Additional arguments: {snakemake_args}")
 
         try:
+            # Ensure .snakemake directory exists for logs and metadata
+            snakemake_dir = Path(".snakemake")
+            snakemake_dir.mkdir(exist_ok=True)
+            (snakemake_dir / "log").mkdir(exist_ok=True)
+            
+            # Parse profile if provided
+            profile_path = self._parse_profile(snakemake_args)
+            profile_config = {}
+            if profile_path:
+                profile_config = self._load_profile_config(profile_path)
+                logger.info(f"Loaded profile from: {profile_path}")
+            
+            # Parse configuration and execution settings
+            # Profile settings can be overridden by command-line args
+            config_dict = self._parse_snakemake_config_dict(snakemake_args)
+            
+            # Get cores/jobs from args first, fall back to profile
+            cores = self._parse_execution_cores(snakemake_args)
+            if cores is None and "cores" in profile_config:
+                cores = profile_config.get("cores")
+                logger.info(f"Using cores from profile: {cores}")
+            
+            jobs = self._parse_jobs(snakemake_args)
+            if jobs is None and "jobs" in profile_config:
+                jobs = profile_config.get("jobs")
+                logger.info(f"Using jobs from profile: {jobs}")
+            
+            # Get executor from args first, fall back to profile
+            executor = self._parse_executor(snakemake_args)
+            if executor == "local" and "executor" in profile_config:
+                # Only override if user didn't explicitly set executor
+                if "--executor" not in snakemake_args:
+                    executor = profile_config.get("executor", "local")
+                    logger.info(f"Using executor from profile: {executor}")
+            
+            # Parse default resources from profile
+            default_resources = self._parse_default_resources(profile_config)
+            
+            # Configure resource settings based on executor type
+            # For local/dryrun: use cores
+            # For remote executors (slurm, etc.): use nodes (jobs) and optionally cores
+            resource_kwargs = {}
+            if executor in ["local", "dryrun"]:
+                # Local execution: cores is required
+                resource_kwargs["cores"] = cores if cores is not None else 1
+            else:
+                # Remote execution: nodes (jobs) is primary, cores can be per-node
+                resource_kwargs["nodes"] = jobs if jobs is not None else 1
+                if cores is not None:
+                    resource_kwargs["cores"] = cores
+            
+            # Add default resources if available
+            if default_resources:
+                resource_kwargs["default_resources"] = default_resources
+            
+            logger.info(f"Executor: {executor}")
+            logger.info(f"Resource settings: {resource_kwargs}")
+            if default_resources:
+                logger.info(f"Default resources: {default_resources.args}")
+            
+            # Create output settings (use defaults for now)
+            output_settings = OutputSettings()
+            
+            # Execute with the new API
             logger.info("Starting Snakemake workflow execution")
-            snakemake.main(argv[1:])  # Skip the 'snakemake' program name
+            with SnakemakeApi(output_settings) as snakemake_api:
+                # Create workflow with explicit workdir (defaults to current directory)
+                workflow_api = snakemake_api.workflow(
+                    resource_settings=ResourceSettings(**resource_kwargs),
+                    config_settings=ConfigSettings(
+                        config=config_dict,
+                        configfiles=[Path(self.args.snakemake_config)],
+                    ),
+                    storage_settings=StorageSettings(),
+                    workflow_settings=WorkflowSettings(),
+                    deployment_settings=DeploymentSettings(),
+                    snakefile=snakefile_path,
+                    workdir=Path.cwd(),  # Explicitly set working directory
+                )
+                
+                # Create DAG
+                dag_api = workflow_api.dag(
+                    dag_settings=DAGSettings(),
+                )
+                
+                # Get executor-specific settings
+                # For remote executors, the plugin's get_settings method needs to be called
+                executor_settings = None
+                if executor not in ["local", "dryrun", "touch"]:
+                    try:
+                        from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry
+                        from dataclasses import fields
+                        
+                        executor_plugin = ExecutorPluginRegistry().get_plugin(executor)
+                        
+                        # Create args object with all required attributes set to None/defaults
+                        # The plugin will use defaults for any None values
+                        class ExecutorArgs:
+                            def __init__(self):
+                                # Set default attributes based on the executor's settings class
+                                if executor_plugin.settings_cls:
+                                    for field in fields(executor_plugin.settings_cls):
+                                        # Use the prefixed name (e.g., "slurm_logdir")
+                                        prefixed_name = f"{executor_plugin.cli_prefix}_{field.name}"
+                                        
+                                        # Check if profile has this setting
+                                        profile_value = profile_config.get(prefixed_name)
+                                        if profile_value is not None:
+                                            setattr(self, prefixed_name, profile_value)
+                                            logger.debug(f"Using {prefixed_name} from profile: {profile_value}")
+                                        else:
+                                            # Set to None - the plugin will use its defaults
+                                            setattr(self, prefixed_name, None)
+                                
+                                # Set sensible defaults for common executor settings
+                                # These will override None values (but not profile values)
+                                if executor == "slurm":
+                                    # Use the .snakemake/log directory we created
+                                    if not hasattr(self, 'slurm_logdir') or self.slurm_logdir is None:
+                                        self.slurm_logdir = snakemake_dir / "log"
+                        
+                        args_obj = ExecutorArgs()
+                        executor_settings = executor_plugin.get_settings(args_obj)
+                        logger.info(f"Loaded executor settings for {executor}")
+                    except Exception as e:
+                        logger.warning(f"Could not load executor settings for {executor}: {e}")
+                        logger.warning("Continuing with default settings...")
+                
+                # Execute workflow
+                dag_api.execute_workflow(
+                    executor=executor,
+                    execution_settings=ExecutionSettings(),
+                    remote_execution_settings=RemoteExecutionSettings(),
+                    scheduling_settings=SchedulingSettings(),
+                    executor_settings=executor_settings,
+                )
+            
             logger.info("Pipeline completed successfully")
 
-        except SystemExit as e:
-            if e.code != 0:
-                logger.error(f"Pipeline failed with exit code {e.code}")
-                sys.exit(1)
-            else:
-                logger.info("Pipeline completed successfully")
         except Exception as e:
-            logger.error(f"Unexpected error during pipeline execution: {e}")
+            logger.error(f"Pipeline execution failed: {e}")
             raise
 
     def run(self) -> None:
@@ -315,20 +651,14 @@ class PipelineCommand(BaseCommand):
         # Load Snakemake config
         snakemake_config = self._load_snakemake_config(self.args.snakemake_config)
 
-        # Prepare Snakemake configuration
-        config = {"toml": self.args.config_file, **snakemake_config}
-
         # Parse additional Snakemake arguments
         snakemake_args = self._parse_snakemake_args(self.args.snakemake_args)
 
         # Locate the Snakefile
         snakefile_path = self._locate_snakefile()
 
-        # Build Snakemake arguments
-        argv = self._build_snakemake_argv(snakefile_path, snakemake_args)
-
         # Execute Snakemake
-        self._execute_snakemake(argv)
+        self._execute_snakemake(snakefile_path, snakemake_args)
 
 
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

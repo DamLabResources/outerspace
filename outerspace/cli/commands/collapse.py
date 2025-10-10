@@ -501,8 +501,9 @@ class CollapseCommand(BaseCommand):
     def _execute_steps(
         self,
         steps: List[Dict[str, Any]],
-        input_dir: str,
-        output_dir: str,
+        input_path: str,
+        output_path: str,
+        is_single_file: bool = False,
     ) -> None:
         """Execute a series of collapse steps iteratively.
         
@@ -510,15 +511,18 @@ class CollapseCommand(BaseCommand):
         ----------
         steps : List[Dict[str, Any]]
             List of step configurations from the config file
-        input_dir : str
-            Initial input directory
-        output_dir : str
-            Final output directory
+        input_path : str
+            Initial input file or directory
+        output_path : str
+            Final output file or directory
+        is_single_file : bool, optional
+            If True, process a single file; if False, process a directory
         """
-        logger.info(f"Executing {len(steps)} collapse steps iteratively")
+        mode = "single file" if is_single_file else "batch"
+        logger.info(f"Executing {len(steps)} collapse steps iteratively ({mode} mode)")
         
-        temp_dirs = []
-        current_input = input_dir
+        temp_paths = []
+        current_input = input_path
         
         try:
             for i, step in enumerate(steps):
@@ -527,14 +531,22 @@ class CollapseCommand(BaseCommand):
                 
                 logger.info(f"=== Step {step_num}/{len(steps)}: {step.get('name', f'step_{step_num}')} ===")
                 
-                # Determine output directory
+                # Determine output path
                 if is_last_step:
-                    current_output = output_dir
+                    current_output = output_path
                 else:
-                    # Create temp directory for intermediate results
-                    temp_dir = tempfile.mkdtemp(prefix=f"collapse_step{step_num}_")
-                    temp_dirs.append(temp_dir)
-                    current_output = temp_dir
+                    # Create temp path for intermediate results
+                    if is_single_file:
+                        # For single file, create a temp file
+                        fd, temp_file = tempfile.mkstemp(suffix=".csv", prefix=f"collapse_step{step_num}_")
+                        os.close(fd)  # Close the file descriptor
+                        temp_paths.append(temp_file)
+                        current_output = temp_file
+                    else:
+                        # For directory, create a temp directory
+                        temp_dir = tempfile.mkdtemp(prefix=f"collapse_step{step_num}_")
+                        temp_paths.append(temp_dir)
+                        current_output = temp_dir
                 
                 # Extract step parameters
                 columns_str = step.get("columns")
@@ -561,23 +573,19 @@ class CollapseCommand(BaseCommand):
                     if not allowed_keys or len(allowed_keys) == 0:
                         raise ValueError(f"Step {step_num}: Method '{method}' requires 'allowed_list'")
                 
-                # Create output directory
-                os.makedirs(current_output, exist_ok=True)
-                
-                # Get list of files to process
-                input_files = glob.glob(os.path.join(current_input, "*.csv"))
-                if not input_files:
-                    raise ValueError(f"Step {step_num}: No CSV files found in {current_input}")
-                
-                logger.info(f"Processing {len(input_files)} files: {current_input} → {current_output}")
-                
-                # Process each file
-                for input_file in tqdm(input_files, desc=f"Step {step_num}"):
-                    output_file = os.path.join(current_output, os.path.basename(input_file))
+                if is_single_file:
+                    # Single file mode
+                    logger.info(f"Processing file: {os.path.basename(current_input)} → {os.path.basename(current_output)}")
+                    
+                    # Create output directory if needed
+                    if is_last_step:
+                        output_dir = os.path.dirname(current_output)
+                        if output_dir:
+                            os.makedirs(output_dir, exist_ok=True)
                     
                     self._process_single_file(
-                        input_file,
-                        output_file,
+                        current_input,
+                        current_output,
                         columns,
                         mismatches,
                         sep,
@@ -593,6 +601,40 @@ class CollapseCommand(BaseCommand):
                         rescue_min_overlap=step.get("rescue_min_overlap", 1),
                         rescue_strategy=step.get("rescue_strategy", "random"),
                     )
+                else:
+                    # Directory mode
+                    # Create output directory
+                    os.makedirs(current_output, exist_ok=True)
+                    
+                    # Get list of files to process
+                    input_files = glob.glob(os.path.join(current_input, "*.csv"))
+                    if not input_files:
+                        raise ValueError(f"Step {step_num}: No CSV files found in {current_input}")
+                    
+                    logger.info(f"Processing {len(input_files)} files: {current_input} → {current_output}")
+                    
+                    # Process each file
+                    for input_file in tqdm(input_files, desc=f"Step {step_num}"):
+                        output_file = os.path.join(current_output, os.path.basename(input_file))
+                        
+                        self._process_single_file(
+                            input_file,
+                            output_file,
+                            columns,
+                            mismatches,
+                            sep,
+                            None,  # row_limit
+                            method,
+                            allowed_keys_ordered=allowed_keys,
+                            mismatch_penalty=step.get("mismatch_penalty", -1),
+                            gap_penalty=step.get("gap_penalty", -3),
+                            match_score=step.get("match_score", 1),
+                            min_score=step.get("min_score", 0),
+                            rescue_exhaustive=step.get("rescue_exhaustive", False),
+                            rescue_kmer_size=step.get("rescue_kmer_size", 3),
+                            rescue_min_overlap=step.get("rescue_min_overlap", 1),
+                            rescue_strategy=step.get("rescue_strategy", "random"),
+                        )
                 
                 logger.info(f"Step {step_num} complete")
                 
@@ -600,11 +642,15 @@ class CollapseCommand(BaseCommand):
                 current_input = current_output
         
         finally:
-            # Clean up temporary directories
-            for temp_dir in temp_dirs:
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
-                    logger.debug(f"Cleaned up temp directory: {temp_dir}")
+            # Clean up temporary paths
+            for temp_path in temp_paths:
+                if os.path.exists(temp_path):
+                    if os.path.isfile(temp_path):
+                        os.remove(temp_path)
+                        logger.debug(f"Cleaned up temp file: {temp_path}")
+                    elif os.path.isdir(temp_path):
+                        shutil.rmtree(temp_path)
+                        logger.debug(f"Cleaned up temp directory: {temp_path}")
 
     def run(self) -> None:
         """Run the collapse command.
@@ -630,18 +676,35 @@ class CollapseCommand(BaseCommand):
             logger.info("Running in steps mode (iterative collapse)")
             
             # Validate input/output arguments
-            if not self.args.input_dir:
-                raise ValueError("Steps mode requires --input-dir")
-            if not self.args.output_dir:
-                raise ValueError("Steps mode requires --output-dir")
+            if not (self.args.input_file or self.args.input_dir):
+                raise ValueError("Steps mode requires either --input-file or --input-dir")
+            if not (self.args.output_file or self.args.output_dir):
+                raise ValueError("Steps mode requires either --output-file or --output-dir")
             
-            self._execute_steps(
-                self._config["steps"],
-                self.args.input_dir,
-                self.args.output_dir,
-            )
+            # Determine if we're in single file or directory mode
+            if self.args.input_file:
+                if not self.args.output_file:
+                    raise ValueError("Steps mode with --input-file requires --output-file")
+                
+                self._execute_steps(
+                    self._config["steps"],
+                    self.args.input_file,
+                    self.args.output_file,
+                    is_single_file=True,
+                )
+                logger.info(f"All steps complete. Final output: {self.args.output_file}")
+            else:
+                if not self.args.output_dir:
+                    raise ValueError("Steps mode with --input-dir requires --output-dir")
+                
+                self._execute_steps(
+                    self._config["steps"],
+                    self.args.input_dir,
+                    self.args.output_dir,
+                    is_single_file=False,
+                )
+                logger.info(f"All steps complete. Final output in: {self.args.output_dir}")
             
-            logger.info(f"All steps complete. Final output in: {self.args.output_dir}")
             return
 
         # Merge config and args with defaults

@@ -147,61 +147,220 @@ def test_locate_snakefile_prefers_packaged(tmp_path):
             assert result == packaged_path
 
 
-def test_build_snakemake_argv_basic(mock_pipeline_command, tmp_path):
-    """Test building basic Snakemake argv"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
+def test_parse_snakemake_config_dict_basic(mock_pipeline_command):
+    """Test parsing basic config dictionary"""
+    config = mock_pipeline_command._parse_snakemake_config_dict([])
     
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, [])
-    
-    assert argv[0] == 'snakemake'
-    assert argv[1] == '-s'
-    assert argv[2] == str(snakefile)
-    assert '--configfile' in argv
-    assert 'test_snakemake.yaml' in argv
-    assert '--config' in argv
-    assert 'toml=test_config.toml' in argv
+    assert 'toml' in config
+    assert config['toml'] == 'test_config.toml'
 
 
-def test_build_snakemake_argv_with_user_args(mock_pipeline_command, tmp_path):
-    """Test building Snakemake argv with user arguments"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
+def test_parse_snakemake_config_dict_with_user_config(mock_pipeline_command):
+    """Test parsing config dictionary with user config arguments"""
+    user_args = ['--config', 'custom_key=custom_value', '--other-arg', 'value']
+    config = mock_pipeline_command._parse_snakemake_config_dict(user_args)
     
-    user_args = ['--dry-run', '--cores', '4']
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, user_args)
-    
-    assert '--dry-run' in argv
-    assert '--cores' in argv
-    assert '4' in argv
+    assert 'toml' in config
+    assert config['toml'] == 'test_config.toml'
+    assert 'custom_key' in config
+    assert config['custom_key'] == 'custom_value'
 
 
-def test_build_snakemake_argv_respects_user_configfile(mock_pipeline_command, tmp_path):
-    """Test that user-provided --configfile is not overridden"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
-    
-    user_args = ['--configfile', 'custom.yaml']
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, user_args)
-    
-    # Should only have one --configfile (the user's)
-    configfile_count = argv.count('--configfile')
-    assert configfile_count == 1
-    configfile_idx = argv.index('--configfile')
-    assert argv[configfile_idx + 1] == 'custom.yaml'
+def test_parse_execution_cores_default():
+    """Test default cores parsing"""
+    cmd = PipelineCommand()
+    cores = cmd._parse_execution_cores([])
+    assert cores is None
 
 
-def test_build_snakemake_argv_respects_user_config(mock_pipeline_command, tmp_path):
-    """Test that user-provided --config is not overridden"""
-    snakefile = tmp_path / 'Snakefile'
-    snakefile.write_text('# Test')
+def test_parse_execution_cores_with_cores_flag():
+    """Test cores parsing with --cores flag"""
+    cmd = PipelineCommand()
+    cores = cmd._parse_execution_cores(['--cores', '4'])
+    assert cores == 4
+
+
+def test_parse_jobs_default():
+    """Test default jobs parsing"""
+    cmd = PipelineCommand()
+    jobs = cmd._parse_jobs([])
+    assert jobs is None
+
+
+def test_parse_jobs_with_jobs_flag():
+    """Test jobs parsing with --jobs flag"""
+    cmd = PipelineCommand()
+    jobs = cmd._parse_jobs(['--jobs', '10'])
+    assert jobs == 10
+
+
+def test_parse_executor_default():
+    """Test default executor is local"""
+    cmd = PipelineCommand()
+    executor = cmd._parse_executor([])
+    assert executor == "local"
+
+
+def test_parse_executor_slurm():
+    """Test parsing SLURM executor"""
+    cmd = PipelineCommand()
+    executor = cmd._parse_executor(['--executor', 'slurm'])
+    assert executor == "slurm"
+
+
+def test_parse_executor_dryrun_overrides():
+    """Test that dry-run overrides explicit executor"""
+    cmd = PipelineCommand()
+    executor = cmd._parse_executor(['--executor', 'slurm', '--dry-run'])
+    assert executor == "dryrun"
+
+
+def test_parse_profile_not_specified():
+    """Test parsing profile when not specified"""
+    cmd = PipelineCommand()
+    profile = cmd._parse_profile([])
+    assert profile is None
+
+
+def test_parse_profile_specified(tmp_path):
+    """Test parsing profile when specified"""
+    cmd = PipelineCommand()
+    profile_dir = tmp_path / "my_profile"
+    profile_dir.mkdir()
     
-    user_args = ['--config', 'custom_key=custom_value']
-    argv = mock_pipeline_command._build_snakemake_argv(snakefile, user_args)
+    profile = cmd._parse_profile(['--profile', str(profile_dir)])
+    assert profile == profile_dir
+
+
+def test_parse_profile_not_exists():
+    """Test parsing profile that doesn't exist"""
+    cmd = PipelineCommand()
+    profile = cmd._parse_profile(['--profile', '/nonexistent/profile'])
+    assert profile is None
+
+
+def test_load_profile_config(tmp_path):
+    """Test loading profile configuration"""
+    cmd = PipelineCommand()
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
     
-    # Should only have one --config (the user's)
-    config_count = argv.count('--config')
-    assert config_count == 1
+    config_file = profile_dir / "config.yaml"
+    config_file.write_text("executor: slurm\njobs: 50\nslurm_partition: compute\n")
+    
+    config = cmd._load_profile_config(profile_dir)
+    assert config["executor"] == "slurm"
+    assert config["jobs"] == 50
+    assert config["slurm_partition"] == "compute"
+
+
+def test_load_profile_config_v8plus(tmp_path):
+    """Test loading v8+ profile configuration"""
+    cmd = PipelineCommand()
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    
+    # Create v8+ config (should be preferred)
+    config_file = profile_dir / "config.v8+.yaml"
+    config_file.write_text("executor: slurm\ncores: 8\n")
+    
+    # Also create regular config
+    (profile_dir / "config.yaml").write_text("executor: local\ncores: 1\n")
+    
+    config = cmd._load_profile_config(profile_dir)
+    # Should use v8+ config
+    assert config["executor"] == "slurm"
+    assert config["cores"] == 8
+
+
+def test_parse_default_resources_none():
+    """Test parsing default resources when none provided"""
+    cmd = PipelineCommand()
+    profile_config = {"executor": "slurm"}
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is None
+
+
+def test_parse_default_resources_list():
+    """Test parsing default resources from list"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": ["mem_mb=4000", "runtime=120", "slurm_account=myaccount"]
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    assert "mem_mb=4000" in result.args
+    assert "runtime=120" in result.args
+    assert "slurm_account=myaccount" in result.args
+
+
+def test_parse_default_resources_underscore():
+    """Test parsing default resources with underscore key"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default_resources": ["mem_mb=2000"]
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    assert "mem_mb=2000" in result.args
+
+
+def test_parse_default_resources_single_string():
+    """Test parsing default resources from single string"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": "mem_mb=4000"
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    assert "mem_mb=4000" in result.args
+
+
+def test_parse_default_resources_dict():
+    """Test parsing default resources from dict (YAML alternative format)"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": {
+            "mem_mb": 4000,
+            "runtime": 120,
+            "slurm_account": "myaccount"
+        }
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is not None
+    # Dict order may vary, so check each item is present
+    assert any("mem_mb=4000" in arg for arg in result.args)
+    assert any("runtime=120" in arg for arg in result.args)
+    assert any("slurm_account=myaccount" in arg for arg in result.args)
+
+
+def test_parse_default_resources_invalid_type():
+    """Test parsing default resources with invalid type"""
+    cmd = PipelineCommand()
+    profile_config = {
+        "default-resources": 12345  # Wrong type (int)
+    }
+    
+    result = cmd._parse_default_resources(profile_config)
+    assert result is None
+
+
+def test_is_dry_run_false():
+    """Test dry-run detection when not set"""
+    cmd = PipelineCommand()
+    assert cmd._is_dry_run([]) is False
+
+
+def test_is_dry_run_true():
+    """Test dry-run detection when set"""
+    cmd = PipelineCommand()
+    assert cmd._is_dry_run(['--dry-run']) is True
+    assert cmd._is_dry_run(['-n']) is True
 
 
 def test_parse_snakemake_args_empty():
@@ -228,41 +387,160 @@ def test_parse_snakemake_args_with_quotes():
     assert result == ['--config', 'key=value with spaces']
 
 
-def test_execute_snakemake_success():
+def test_execute_snakemake_success(tmp_path):
     """Test successful Snakemake execution"""
     cmd = PipelineCommand()
+    cmd.args = Mock()
     
-    with patch('outerspace.cli.commands.pipeline.snakemake.main') as mock_snakemake:
-        # Mock successful execution (no exception)
-        mock_snakemake.return_value = None
-        
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Mock the new Snakemake v9 API
+    mock_dag_api = MagicMock()
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
         # Should not raise
-        cmd._execute_snakemake(['snakemake', '--help'])
-        mock_snakemake.assert_called_once_with(['--help'])
+        cmd._execute_snakemake(snakefile, [])
+        
+        # Verify API was called correctly
+        mock_snakemake_api.workflow.assert_called_once()
+        mock_workflow_api.dag.assert_called_once()
+        mock_dag_api.execute_workflow.assert_called_once()
 
 
-def test_execute_snakemake_failure():
+def test_execute_snakemake_with_profile_default_resources(tmp_path):
+    """Test Snakemake execution with profile containing default-resources"""
+    cmd = PipelineCommand()
+    cmd.args = Mock()
+    
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Create profile with default-resources
+    profile_dir = tmp_path / 'profile'
+    profile_dir.mkdir()
+    profile_config = profile_dir / 'config.yaml'
+    profile_config.write_text(
+        'executor: local\n'
+        'cores: 2\n'
+        'default-resources:\n'
+        '  - mem_mb=4000\n'
+        '  - runtime=120\n'
+    )
+    
+    # Mock the new Snakemake v9 API
+    mock_dag_api = MagicMock()
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
+        # Execute with profile
+        cmd._execute_snakemake(snakefile, ['--profile', str(profile_dir)])
+        
+        # Verify API was called correctly
+        mock_snakemake_api.workflow.assert_called_once()
+        
+        # Verify that ResourceSettings was called with default_resources
+        call_kwargs = mock_snakemake_api.workflow.call_args[1]
+        resource_settings = call_kwargs['resource_settings']
+        assert hasattr(resource_settings, 'default_resources')
+        assert resource_settings.default_resources is not None
+        assert 'mem_mb=4000' in resource_settings.default_resources.args
+        assert 'runtime=120' in resource_settings.default_resources.args
+
+
+def test_execute_snakemake_failure(tmp_path):
     """Test failed Snakemake execution"""
     cmd = PipelineCommand()
+    cmd.args = Mock()
     
-    with patch('outerspace.cli.commands.pipeline.snakemake.main') as mock_snakemake:
-        # Mock failed execution
-        mock_snakemake.side_effect = SystemExit(1)
-        
-        with pytest.raises(SystemExit):
-            cmd._execute_snakemake(['snakemake', '--help'])
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Mock the new Snakemake v9 API with failure
+    mock_dag_api = MagicMock()
+    mock_dag_api.execute_workflow.side_effect = Exception("Workflow failed")
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
+        with pytest.raises(Exception, match="Workflow failed"):
+            cmd._execute_snakemake(snakefile, [])
 
 
-def test_execute_snakemake_success_exit():
-    """Test Snakemake execution with SystemExit(0)"""
+def test_execute_snakemake_success_exit(tmp_path):
+    """Test Snakemake execution completes successfully"""
     cmd = PipelineCommand()
+    cmd.args = Mock()
     
-    with patch('outerspace.cli.commands.pipeline.snakemake.main') as mock_snakemake:
-        # Mock successful exit
-        mock_snakemake.side_effect = SystemExit(0)
-        
+    # Create test config files with valid YAML dict
+    config_yaml = tmp_path / 'test.yaml'
+    config_yaml.write_text('test_key: test_value\n')
+    config_toml = tmp_path / 'test.toml'
+    config_toml.write_text('# Test toml\n')
+    
+    cmd.args.snakemake_config = str(config_yaml)
+    cmd.args.config_file = str(config_toml)
+    
+    snakefile = tmp_path / 'Snakefile'
+    snakefile.write_text('# Test')
+    
+    # Mock the new Snakemake v9 API
+    mock_dag_api = MagicMock()
+    mock_workflow_api = MagicMock()
+    mock_workflow_api.dag.return_value = mock_dag_api
+    mock_snakemake_api = MagicMock()
+    mock_snakemake_api.workflow.return_value = mock_workflow_api
+    mock_snakemake_api.__enter__ = Mock(return_value=mock_snakemake_api)
+    mock_snakemake_api.__exit__ = Mock(return_value=False)
+    
+    with patch('outerspace.cli.commands.pipeline.SnakemakeApi', return_value=mock_snakemake_api):
         # Should not raise
-        cmd._execute_snakemake(['snakemake', '--help'])
+        cmd._execute_snakemake(snakefile, [])
+        
+        # Verify execution happened
+        mock_dag_api.execute_workflow.assert_called_once()
 
 
 @pytest.mark.integration
