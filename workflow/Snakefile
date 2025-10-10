@@ -75,6 +75,7 @@ rule findseq:
         toml = get_toml_file
     output:
         'findseq/{sample}.csv'
+    threads: config.get('threads', 1)
     script:
         'wrappers/findseq/wrapper.py'
 

@@ -133,34 +133,6 @@ Note: Executor plugins must be installed separately via pip (e.g., `pip install 
 
 ## Troubleshooting
 
-### SLURM Errors
-
-**Error: `'NoneType' object has no attribute 'logdir'` or `'ExecutorArgs' object has no attribute 'slurm_logdir'`**
-
-These errors occur when executor-specific settings cannot be properly initialized. This has been fixed in the latest version.
-
-**Solution:**
-```bash
-# Ensure you're in a writable directory
-cd /path/to/your/workdir
-
-# Make sure the SLURM plugin is installed
-pip install snakemake-executor-plugin-slurm
-
-# Verify the plugin is available
-python -c "from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry; print('slurm' in ExecutorPluginRegistry().plugins)"
-
-# Run the pipeline (it will create .snakemake/log automatically and configure executor settings)
-outerspace pipeline config.toml snakemake_config.yaml \
-    --snakemake-args="--executor slurm --jobs 100"
-```
-
-**What the pipeline does automatically:**
-- Creates `.snakemake/log` directory for SLURM job logs
-- Initializes executor-specific settings with sensible defaults
-- Sets `slurm_logdir` to `.snakemake/log`
-- Configures other SLURM parameters to their defaults
-
 **Error: SLURM jobs not submitting**
 
 Check that:
@@ -197,6 +169,7 @@ The OUTERSPACE Snakemake workflow (`workflow/Snakefile`) implements a complete a
 1. **findseq**: Extracts sequences from FASTQ files based on configuration patterns
    - Supports both single-end and paired-end reads
    - Outputs CSV files with extracted sequences
+   - Supports multi-threaded parallel processing (configurable via `threads` parameter)
 
 2. **collapse**: Corrects barcodes using UMI-tools clustering
    - Takes findseq output as input
@@ -220,6 +193,27 @@ The workflow automatically handles:
 - Parallel processing of multiple samples
 - Proper file naming and organization
 - Dependency tracking between steps
+
+## Workflow Configuration
+
+### Thread Configuration
+
+The `findseq` step supports multi-threaded parallel processing for improved performance on large FASTQ files. You can configure the number of threads in your Snakemake YAML configuration file:
+
+```yaml
+# config.yaml
+samples: samples.csv
+toml: config.toml
+threads: 8  # Use 8 threads for findseq processing
+```
+
+Alternatively, you can override the thread count when running the pipeline:
+
+```bash
+outerspace pipeline config.toml config.yaml --snakemake-args="--config threads=8"
+```
+
+Note: The actual speedup depends on your system's I/O performance and CPU capabilities. If not specified, `threads` defaults to 1.
 
 ## Snakemake Wrappers
 
@@ -257,6 +251,7 @@ rule findseq:
         toml = get_toml_file
     output:
         'findseq/{sample}.csv'
+    threads: config.get('threads', 1)
     script:
         'wrappers/findseq/wrapper.py'
 ```
@@ -266,8 +261,6 @@ This approach allows for:
 - Consistent execution across environments
 - Simple integration with cluster schedulers
 - Reproducible analysis workflows
-
-**Note**: In Snakemake v9, the `script:` directive is used for local Python scripts, while `wrapper:` is reserved for remote wrappers from the Snakemake wrapper repository.
 
 
 Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
