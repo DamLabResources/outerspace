@@ -4,8 +4,10 @@ This module provides abstract base classes for different types of UMI statistics
 calculations including single-sample, pairwise, and differential analysis.
 """
 
+import csv
 import logging
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TypeVar, Union
 
 from ..umi import UMI, UmiCollection
@@ -120,6 +122,37 @@ class BaseStatistic(ABC):
             logger.debug(f"Calculating {cls.__name__} for sample {sample_name}")
             results[sample_name] = cls.calculate(umi, **kwargs)
         return results
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> T:
+        """Create statistic from step parameters and CSV file.
+
+        This method provides a generic interface for calculating statistics
+        from configuration step parameters. Subclasses should override this
+        method to implement their specific parameter handling.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to input CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Step-specific parameters from configuration
+
+        Returns
+        -------
+        T
+            Calculated statistic value
+
+        Raises
+        ------
+        NotImplementedError
+            If subclass doesn't implement this method
+        """
+        raise NotImplementedError(
+            f"{cls.__name__} must implement _from_step classmethod"
+        )
 
 
 class BasePairwiseStatistic(ABC):

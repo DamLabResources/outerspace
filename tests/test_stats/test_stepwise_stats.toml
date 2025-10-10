@@ -1,0 +1,38 @@
+# Test configuration for stepwise stats
+
+[[stats.metrics]]
+method = "simpson_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "barcode_corrected"
+name = "protospacer_simpson"
+
+[[stats.metrics]]
+method = "shannon_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "barcode_corrected"
+name = "protospacer_shannon"
+
+[[stats.metrics]]
+method = "gini_coefficient"
+key_column = "protospacer_corrected"
+barcode_column = "barcode_corrected"
+name = "protospacer_gini"
+
+[[stats.metrics]]
+method = "error_rate"
+original_column = "protospacer"
+corrected_column = "protospacer_corrected"
+name = "protospacer_error"
+
+[[stats.metrics]]
+method = "error_rate"
+original_column = "barcode"
+corrected_column = "barcode_corrected"
+name = "barcode_error"
+
+[[stats.metrics]]
+method = "umi_redundancy"
+key_column = "protospacer_corrected"
+barcode_column = "barcode_corrected"
+name = "protospacer_redundancy"
+

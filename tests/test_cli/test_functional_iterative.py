@@ -115,20 +115,6 @@ def test_full_workflow(temp_workspace):
     # Verify merge output
     assert os.path.exists(os.path.join(temp_workspace, "merged_counts.csv"))
 
-    # Step 5: Run stats command
-    stats_args = [
-        "stats",
-        os.path.join(temp_workspace, "count/shuffle.csv"),
-        os.path.join(temp_workspace, "count/M1-lib.csv"),
-        os.path.join(temp_workspace, "count/M2-lib.csv"),
-        "--key-column",
-        "protospacer",
-        "--count-column",
-        "UMI_5prime_UMI_3prime_corrected_count",
-    ]
-    cli = Cli(stats_args)
-    cli.run()
-
 
 def test_workflow_with_allowed_list(temp_workspace):
     """Test the workflow with an allowed list for counting"""
@@ -231,20 +217,6 @@ def test_workflow_with_allowed_list(temp_workspace):
 
     # Verify merge output
     assert os.path.exists(os.path.join(temp_workspace, "merged_counts_long.csv"))
-
-    # Step 5: Run stats command
-    stats_args = [
-        "stats",
-        os.path.join(temp_workspace, "count/shuffle.csv"),
-        os.path.join(temp_workspace, "count/M1-lib.csv"),
-        os.path.join(temp_workspace, "count/M2-lib.csv"),
-        "--key-column",
-        "protospacer",
-        "--count-column",
-        "UMI_5prime_UMI_3prime_corrected_count",
-    ]
-    cli = Cli(stats_args)
-    cli.run()
 
 
 def test_full_workflow_with_key_rescue(temp_workspace):
@@ -367,19 +339,6 @@ def test_full_workflow_with_key_rescue(temp_workspace):
 
     assert os.path.exists(os.path.join(temp_workspace, "merged_counts.csv"))
 
-    # Step 5: Run stats command (using corrected key column)
-    stats_args = [
-        "stats",
-        os.path.join(temp_workspace, "count/shuffle.csv"),
-        os.path.join(temp_workspace, "count/M1-lib.csv"),
-        os.path.join(temp_workspace, "count/M2-lib.csv"),
-        "--key-column",
-        "protospacer_corrected",
-        "--count-column",
-        "UMI_5prime_UMI_3prime_corrected_count",
-    ]
-    cli = Cli(stats_args)
-    cli.run()
 
 def test_single_file_workflow(temp_workspace):
     """Test the workflow using single file mode for collapse and count"""
@@ -437,18 +396,6 @@ def test_single_file_workflow(temp_workspace):
 
     # Verify count output
     assert os.path.exists(os.path.join(temp_workspace, "count/shuffle.csv"))
-
-    # Step 4: Run stats command on single file
-    stats_args = [
-        "stats",
-        os.path.join(temp_workspace, "count/shuffle.csv"),
-        "--key-column",
-        "protospacer",
-        "--count-column",
-        "UMI_5prime_UMI_3prime_corrected_count",
-    ]
-    cli = Cli(stats_args)
-    cli.run()
 
 
 def test_workflow_with_config(temp_workspace):

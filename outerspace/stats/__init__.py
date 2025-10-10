@@ -14,6 +14,7 @@ from .single import (
     UMIEfficiencyRate,
     UMIErrorRate,
     UMIRedundancy,
+    ErrorRate,
 )
 
 from .multi import (
@@ -41,6 +42,7 @@ __all__ = [
     "UMIEfficiencyRate",
     "UMIErrorRate",
     "UMIRedundancy",
+    "ErrorRate",
     "JaccardSimilarity",
     "BrayCurtisDissimilarity",
     "SpearmanCorrelation",
