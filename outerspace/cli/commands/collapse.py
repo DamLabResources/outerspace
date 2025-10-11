@@ -349,13 +349,13 @@ class CollapseCommand(BaseCommand):
             
             if method == "nearest" and finder:
                 # Use batch processing for nearest-neighbor matching
-                desc = "Nearest-neighbor matching (batch)"
                 
                 # First pass: identify exact matches and collect rescue candidates
+                logger.info("Scanning rows for rescue candidates...")
                 rescue_indices = []
                 rescue_values = []
                 
-                for i, row in enumerate(tqdm(rows, desc="Identifying rescue candidates")):
+                for i, row in enumerate(rows):
                     value = str(row.get(column, ""))
                     if not value or value in allowed_keys_set:
                         # Exact match or empty - no rescue needed
@@ -365,16 +365,22 @@ class CollapseCommand(BaseCommand):
                         rescue_indices.append(i)
                         rescue_values.append(value)
                 
-                # Batch process rescue values using find_many
+                logger.info(f"Found {len(rescue_values)} unique values requiring nearest-neighbor matching")
+                
+                # Batch process rescue values using find_many (with progress bar inside)
                 rescue_results = {}
                 if rescue_values:
                     num_threads = threads if threads is not None else 1
-                    logger.info(f"Processing {len(rescue_values)} rescue candidates with {num_threads} threads")
-                    results = finder.find_many(rescue_values, threads=num_threads)
-                    rescue_results = dict(zip(rescue_values, results))
+                    logger.info(f"Using {num_threads} thread(s) for parallel processing")
+                    # Get unique rescue values to avoid duplicate work
+                    unique_rescue_values = list(set(rescue_values))
+                    logger.info(f"Processing {len(unique_rescue_values)} unique rescue candidates")
+                    results = finder.find_many(unique_rescue_values, threads=num_threads)
+                    rescue_results = dict(zip(unique_rescue_values, results))
                 
                 # Second pass: apply corrections
-                for row in tqdm(rows, desc="Applying corrections"):
+                logger.info("Applying corrections to all rows...")
+                for row in rows:
                     corrected_row = row.copy()
                     value = str(row.get(column, ""))
                     

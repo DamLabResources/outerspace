@@ -8,6 +8,7 @@ import logging
 from typing import Optional, Tuple, List, Iterable, Dict, Set
 from functools import lru_cache
 from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -203,7 +204,7 @@ class NearestUMIFinder:
             min_kmer_overlap=self._min_kmer_overlap,
         )
         
-        # Execute in parallel
+        # Execute in parallel with progress bar
         with ProcessPoolExecutor(max_workers=threads) as executor:
             # Calculate chunksize for better performance with large datasets
             if batch_size is not None:
@@ -212,7 +213,12 @@ class NearestUMIFinder:
                 chunksize = max(1, len(query_list) // (threads * 4))
             
             logger.debug(f"Using batch_size={chunksize} for parallel processing")
-            results = list(executor.map(worker, query_list, chunksize=chunksize))
+            results = list(tqdm(
+                executor.map(worker, query_list, chunksize=chunksize),
+                total=len(query_list),
+                desc="Finding nearest matches",
+                unit="query"
+            ))
         
         return results
 

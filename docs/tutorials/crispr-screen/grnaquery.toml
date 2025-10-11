@@ -30,6 +30,10 @@ pattern_names = ["UMI_5prime", "protospacer", "UMI_3prime"]
 # Alternative: use_all_patterns = true
 matches_only = true
 
+[collapse]
+threads = 8
+
+
 # Iterative collapse steps (recommended approach)
 [[collapse.steps]]
 name = "umi_correction"
