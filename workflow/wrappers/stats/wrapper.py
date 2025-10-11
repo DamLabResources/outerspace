@@ -14,9 +14,18 @@ if "snakemake" not in locals():
     import snakemake  # type: ignore
 
 # Get input and output files
-input_files = snakemake.input
 output_file = snakemake.output[0]
 toml_file = snakemake.input.get("toml", None)
+
+# Get CSV input files (exclude the toml file)
+if hasattr(snakemake.input, 'csv'):
+    # If csv is explicitly named in the input
+    csv_files = snakemake.input.csv
+    if not isinstance(csv_files, list):
+        csv_files = [csv_files]
+else:
+    # Filter out the toml file from all inputs
+    csv_files = [f for f in snakemake.input if f != toml_file]
 
 # Construct command line arguments
 args = [
@@ -24,11 +33,8 @@ args = [
     '-c', toml_file,
 ]
 
-# Add input files (can be single file or list of files)
-if isinstance(input_files, str):
-    args.append(input_files)
-else:
-    args.extend(input_files)
+# Add CSV input files
+args.extend(csv_files)
 
 # Redirect stdout to output file since stats command writes to stdout
 original_stdout = sys.stdout

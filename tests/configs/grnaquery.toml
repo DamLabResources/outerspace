@@ -63,9 +63,23 @@ column = 'UMI_5prime_UMI_3prime_corrected_count'
 column = 'UMI_5prime_UMI_3prime_corrected_count'
 key_column = 'protospacer'
 
-[stats]
-key_column = 'protospacer'
-count_column = 'UMI_5prime_UMI_3prime_corrected_count'
+[[stats.metrics]]
+method = "simpson_diversity"
+key_column = "protospacer"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "simpson"
+
+[[stats.metrics]]
+method = "shannon_diversity"
+key_column = "protospacer"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "shannon"
+
+[[stats.metrics]]
+method = "gini_coefficient"
+key_column = "protospacer"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "gini"
 
 [owner]
 name = "SCB, DK, WND, RB"

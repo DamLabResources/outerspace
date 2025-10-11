@@ -88,9 +88,9 @@ echo "=== Step 5: Generate Statistics ==="
 # Generate comprehensive statistics using config
 echo "Generating statistics for all samples using configuration file..."
 outerspace stats -c grnaquery.toml \
-    results/count/shuffle.csv \
-    results/count/M1-lib.csv \
-    results/count/M2-lib.csv
+    results/collapsed/shuffle.csv \
+    results/collapsed/M1-lib.csv \
+    results/collapsed/M2-lib.csv >  results/statistics.csv
 
 echo ""
 echo "=== Tutorial Complete! ==="

@@ -112,7 +112,7 @@ rule merge:
 
 rule stats:
     input:
-        csv = expand('count/{sample}.csv',
+        csv = expand('collapse/{sample}.csv',
                sample=SAMPLES.index),
         toml = get_toml_file
     output:

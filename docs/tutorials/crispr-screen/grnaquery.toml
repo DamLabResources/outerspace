@@ -61,9 +61,44 @@ column = 'UMI_5prime_UMI_3prime_corrected_count'
 column = 'UMI_5prime_UMI_3prime_corrected_count'
 key_column = 'protospacer_corrected'
 
-[stats]
-key_column = 'protospacer_corrected'
-count_column = 'UMI_5prime_UMI_3prime_corrected_count'
+# Statistics metrics to calculate
+[[stats.metrics]]
+method = "simpson_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "protospacer_simpson"
+
+[[stats.metrics]]
+method = "shannon_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "protospacer_shannon"
+
+[[stats.metrics]]
+method = "gini_coefficient"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "protospacer_gini"
+
+[[stats.metrics]]
+method = "umi_redundancy"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "protospacer_redundancy"
+
+[[stats.metrics]]
+method = "umi_recovery_rate"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+allowed_list = "data/library_protospacers.txt"
+name = "protospacer_recovery_rate"
+
+[[stats.metrics]]
+method = "umi_efficiency_rate"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+allowed_list = "data/library_protospacers.txt"
+name = "protospacer_efficiency_rate"
 
 [owner]
 name = "SCB, DK, WND, RB"

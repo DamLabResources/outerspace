@@ -4,8 +4,11 @@ This module provides classes for calculating various statistics on individual
 UMI libraries including diversity metrics, efficiency measures, and error rates.
 """
 
+import csv
 import logging
-from typing import Dict, List, Optional, Sequence, Any
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Any, Set
 import numpy as np
 import pandas as pd
 from ..umi import UMI
@@ -17,6 +20,104 @@ logger = logging.getLogger(__name__)
 
 __copyright__ = "Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved."
 __author__ = "WND"
+
+
+def _read_allowed_list(filepath: str) -> List[str]:
+    """Read allowed values from a text file.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to text file containing allowed values
+
+    Returns
+    -------
+    List[str]
+        List of allowed values with empty lines filtered out
+    """
+    with open(filepath, "r") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def _aggregate_counts_from_csv(
+    input_file: str,
+    key_column: str,
+    barcode_column: Optional[str] = None,
+    sep: str = ","
+) -> Dict[str, int]:
+    """Aggregate counts from collapse output CSV.
+
+    This function reads a collapse output CSV and aggregates the data to produce
+    counts suitable for creating a UMI object for statistics calculation.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to input CSV file (collapse output)
+    key_column : str
+        Column containing the keys (e.g., corrected sequence)
+    barcode_column : Optional[str], default=None
+        If provided, count unique values in this column per key (e.g., unique UMIs per sequence).
+        If None, count occurrences of each key (e.g., number of reads per sequence).
+    sep : str, default=','
+        CSV separator
+
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary mapping keys to their counts
+
+    Raises
+    ------
+    ValueError
+        If required columns are not found in the CSV file
+    """
+    if barcode_column:
+        # Count unique barcodes per key
+        key_barcodes: Dict[str, Set[str]] = defaultdict(set)
+        
+        with open(input_file, "r") as f:
+            reader = csv.DictReader(f, delimiter=sep)
+            
+            if key_column not in reader.fieldnames:
+                raise ValueError(f"Column '{key_column}' not found in {input_file}")
+            if barcode_column not in reader.fieldnames:
+                raise ValueError(f"Column '{barcode_column}' not found in {input_file}")
+            
+            for row in reader:
+                key = row[key_column]
+                barcode = row[barcode_column]
+                
+                if key and barcode:  # Skip empty values
+                    key_barcodes[key].add(barcode)
+        
+        # Convert to counts
+        counts = {key: len(barcodes) for key, barcodes in key_barcodes.items()}
+        logger.debug(
+            f"Aggregated {sum(counts.values())} unique barcodes across {len(counts)} keys"
+        )
+        return counts
+    else:
+        # Count occurrences of each key
+        key_counts: Dict[str, int] = defaultdict(int)
+        
+        with open(input_file, "r") as f:
+            reader = csv.DictReader(f, delimiter=sep)
+            
+            if key_column not in reader.fieldnames:
+                raise ValueError(f"Column '{key_column}' not found in {input_file}")
+            
+            for row in reader:
+                key = row[key_column]
+                
+                if key:  # Skip empty values
+                    key_counts[key] += 1
+        
+        counts = dict(key_counts)
+        logger.debug(
+            f"Counted {sum(counts.values())} total occurrences across {len(counts)} keys"
+        )
+        return counts
 
 
 class UMIStats(BaseStatistic):
@@ -164,6 +265,56 @@ class GiniCoefficient(UMIStats):
         logger.debug(f"Calculated Gini coefficient: {result}")
         return result
 
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to collapse output CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str (optional) - Path to allowed list file
+            - use_corrected: bool (optional) - Whether to use corrected counts
+
+        Returns
+        -------
+        Optional[float]
+            Calculated Gini coefficient
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)  # No correction needed, data is pre-collapsed
+
+        if not key_column:
+            raise ValueError("key_column is required for GiniCoefficient")
+
+        # Load allowed list if provided
+        allowed_list = None
+        if allowed_list_path:
+            allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        # Set mapping for pre-collapsed data (each key maps to itself)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+
 
 class ShannonDiversity(UMIStats):
     """Calculate Shannon diversity index for UMI counts.
@@ -256,6 +407,57 @@ class ShannonDiversity(UMIStats):
         logger.debug(f"Calculated Shannon diversity (base {self.base}): {result}")
         return result
 
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to collapse output CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str (optional) - Path to allowed list file
+            - use_corrected: bool (optional) - Whether to use corrected counts
+            - base: float (optional) - Base for logarithm (default 2.0)
+
+        Returns
+        -------
+        Optional[float]
+            Calculated Shannon diversity
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)
+        base = step_params.get("base", 2.0)
+
+        if not key_column:
+            raise ValueError("key_column is required for ShannonDiversity")
+
+        # Load allowed list if provided
+        allowed_list = None
+        if allowed_list_path:
+            allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list, base=base)
+
 
 class SimpsonDiversity(UMIStats):
     """Calculate Simpson's diversity index for UMI counts.
@@ -341,6 +543,55 @@ class SimpsonDiversity(UMIStats):
         logger.debug(f"Calculated Simpson diversity: {result}")
         return result
 
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to collapse output CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str (optional) - Path to allowed list file
+            - use_corrected: bool (optional) - Whether to use corrected counts
+
+        Returns
+        -------
+        Optional[float]
+            Calculated Simpson diversity
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)
+
+        if not key_column:
+            raise ValueError("key_column is required for SimpsonDiversity")
+
+        # Load allowed list if provided
+        allowed_list = None
+        if allowed_list_path:
+            allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+
 
 class UMIRecoveryRate(UMIStats):
     """Calculate UMI recovery rate.
@@ -410,6 +661,55 @@ class UMIRecoveryRate(UMIStats):
         )
         logger.debug(f"Calculated UMI recovery rate: {result}")
         return result
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to input CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str - Path to allowed list file (required)
+            - use_corrected: bool (optional) - Whether to use corrected counts
+
+        Returns
+        -------
+        Optional[float]
+            Calculated UMI recovery rate
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)
+
+        if not key_column:
+            raise ValueError("key_column is required for UMIRecoveryRate")
+        if not allowed_list_path:
+            raise ValueError("allowed_list is required for UMIRecoveryRate")
+
+        # Load allowed list
+        allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
 
 class UMIEfficiencyRate(UMIStats):
@@ -492,6 +792,55 @@ class UMIEfficiencyRate(UMIStats):
         )
         logger.debug(f"Calculated UMI efficiency rate: {result}")
         return result
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to input CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str - Path to allowed list file (required)
+            - use_corrected: bool (optional) - Whether to use corrected counts
+
+        Returns
+        -------
+        Optional[float]
+            Calculated UMI efficiency rate
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)
+
+        if not key_column:
+            raise ValueError("key_column is required for UMIEfficiencyRate")
+        if not allowed_list_path:
+            raise ValueError("allowed_list is required for UMIEfficiencyRate")
+
+        # Load allowed list
+        allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
 
 class UMIErrorRate(BaseStatistic):
@@ -663,6 +1012,162 @@ class UMIRedundancy(UMIStats):
         result = UMIRedundancy.calculate_redundancy(counts)
         logger.debug(f"Calculated UMI redundancy: {result}")
         return result
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to input CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str (optional) - Path to allowed list file
+            - use_corrected: bool (optional) - Whether to use corrected counts
+
+        Returns
+        -------
+        Optional[float]
+            Calculated UMI redundancy
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)
+
+        if not key_column:
+            raise ValueError("key_column is required for UMIRedundancy")
+
+        # Load allowed list if provided
+        allowed_list = None
+        if allowed_list_path:
+            allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+
+
+class ErrorRate(BaseStatistic):
+    """Calculate error rate by comparing original and corrected columns.
+
+    This class compares two columns from a CSV file to calculate the
+    error rate based on Hamming distance between corresponding values.
+    """
+
+    def __init__(self, umi: UMI, **kwargs: Any) -> None:
+        """Initialize error rate calculator.
+
+        Parameters
+        ----------
+        umi : UMI
+            UMI object (not used in this implementation)
+        **kwargs : Any
+            Additional arguments (not used)
+        """
+        super().__init__(umi, **kwargs)
+
+    def run(self) -> Optional[float]:
+        """Not implemented for this class.
+
+        Use _from_step classmethod instead.
+        """
+        raise NotImplementedError("Use ErrorRate._from_step() instead")
+
+    @staticmethod
+    def hamming_distance(seq1: str, seq2: str) -> int:
+        """Calculate Hamming distance between two sequences.
+
+        Parameters
+        ----------
+        seq1 : str
+            First sequence
+        seq2 : str
+            Second sequence
+
+        Returns
+        -------
+        int
+            Number of mismatches between sequences
+        """
+        if len(seq1) != len(seq2):
+            raise ValueError("Sequences must be of the same length")
+        return sum(c1 != c2 for c1, c2 in zip(seq1, seq2))
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to input CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - original_column: str - Column with original values
+            - corrected_column: str - Column with corrected values
+
+        Returns
+        -------
+        Optional[float]
+            Calculated error rate (errors per position)
+        """
+        original_column = step_params.get("original_column")
+        corrected_column = step_params.get("corrected_column")
+
+        if not original_column or not corrected_column:
+            raise ValueError("Both original_column and corrected_column are required for ErrorRate")
+
+        total_mismatches = 0
+        total_positions = 0
+
+        with open(input_file, "r") as f:
+            reader = csv.DictReader(f, delimiter=sep)
+            
+            if original_column not in reader.fieldnames:
+                raise ValueError(f"Column '{original_column}' not found in {input_file}")
+            if corrected_column not in reader.fieldnames:
+                raise ValueError(f"Column '{corrected_column}' not found in {input_file}")
+
+            for row in reader:
+                original = row[original_column]
+                corrected = row[corrected_column]
+                
+                if not original or not corrected:
+                    continue
+
+                if len(original) != len(corrected):
+                    logger.warning(
+                        f"Skipping row with mismatched lengths: '{original}' vs '{corrected}'"
+                    )
+                    continue
+
+                total_mismatches += cls.hamming_distance(original, corrected)
+                total_positions += len(original)
+
+        if total_positions == 0:
+            return None
+
+        error_rate = total_mismatches / total_positions
+        logger.debug(f"Calculated error rate: {error_rate} ({total_mismatches}/{total_positions})")
+        return error_rate
 
 
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

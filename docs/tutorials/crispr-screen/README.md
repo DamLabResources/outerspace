@@ -141,12 +141,42 @@ key_column = 'protospacer_corrected'
 column = 'UMI_5prime_UMI_3prime_corrected_count'
 key_column = 'protospacer_corrected'
 
-[stats]
-key_column = 'protospacer_corrected'
-count_column = 'UMI_5prime_UMI_3prime_corrected_count'
+[[stats.metrics]]
+method = "simpson_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected_count"
+name = "protospacer_simpson"
+
+[[stats.metrics]]
+method = "shannon_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected_count"
+name = "protospacer_shannon"
+
+[[stats.metrics]]
+method = "gini_coefficient"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected_count"
+name = "protospacer_gini"
+
+[[stats.metrics]]
+method = "umi_recovery_rate"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected_count"
+allowed_list = "data/library_protospacers.txt"
+name = "protospacer_recovery_rate"
 ```
 
-These sections define default parameters for the merge and stats commands (note they use `protospacer_corrected`).
+The `[[stats.metrics]]` sections define individual statistics to calculate:
+- Each metric has a `method` (the statistical calculation to perform)
+- A `name` for the output column (allowing custom, descriptive names)
+- Parameters specific to each metric (e.g., `key_column`, `barcode_column`, `allowed_list`)
+
+This stepwise approach allows you to:
+- Calculate multiple different metrics in one run
+- Customize which metrics are calculated for your specific needs
+- Use different columns or parameters for different metrics
+- Get clearly named output columns
 
 ## Tutorial Workflow (Configuration File Approach)
 
@@ -249,15 +279,25 @@ outerspace merge -c grnaquery.toml \
 
 ### Step 5: Generate Statistics
 
-Calculate summary statistics using config settings:
+Calculate summary statistics using the metrics defined in the config:
 
 ```bash
-# Generate comprehensive statistics using config
+# Generate comprehensive statistics using metrics from config
 outerspace stats -c grnaquery.toml \
     results/count/shuffle.csv \
     results/count/M1-lib.csv \
     results/count/M2-lib.csv
 ```
+
+**What this calculates** (based on `[[stats.metrics]]` sections in config):
+- **Simpson diversity**: Measures the diversity of protospacer distribution
+- **Shannon diversity**: Alternative diversity metric
+- **Gini coefficient**: Measures inequality in the distribution
+- **UMI redundancy**: Average reads per unique UMI
+- **Recovery rate**: Fraction of expected protospacers found
+- **Efficiency rate**: Fraction of reads matching allowed protospacers
+
+**Expected output**: CSV file with one row per input file and columns for each metric defined in the config. The output column names match the `name` field from each `[[stats.metrics]]` section.
 
 ## Understanding Iterative Collapse Steps
 
