@@ -6,8 +6,9 @@ UMI libraries including diversity metrics, efficiency measures, and error rates.
 
 import csv
 import logging
+from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Any
+from typing import Dict, List, Optional, Sequence, Any, Set
 import numpy as np
 import pandas as pd
 from ..umi import UMI
@@ -36,6 +37,87 @@ def _read_allowed_list(filepath: str) -> List[str]:
     """
     with open(filepath, "r") as f:
         return [line.strip() for line in f if line.strip()]
+
+
+def _aggregate_counts_from_csv(
+    input_file: str,
+    key_column: str,
+    barcode_column: Optional[str] = None,
+    sep: str = ","
+) -> Dict[str, int]:
+    """Aggregate counts from collapse output CSV.
+
+    This function reads a collapse output CSV and aggregates the data to produce
+    counts suitable for creating a UMI object for statistics calculation.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to input CSV file (collapse output)
+    key_column : str
+        Column containing the keys (e.g., corrected sequence)
+    barcode_column : Optional[str], default=None
+        If provided, count unique values in this column per key (e.g., unique UMIs per sequence).
+        If None, count occurrences of each key (e.g., number of reads per sequence).
+    sep : str, default=','
+        CSV separator
+
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary mapping keys to their counts
+
+    Raises
+    ------
+    ValueError
+        If required columns are not found in the CSV file
+    """
+    if barcode_column:
+        # Count unique barcodes per key
+        key_barcodes: Dict[str, Set[str]] = defaultdict(set)
+        
+        with open(input_file, "r") as f:
+            reader = csv.DictReader(f, delimiter=sep)
+            
+            if key_column not in reader.fieldnames:
+                raise ValueError(f"Column '{key_column}' not found in {input_file}")
+            if barcode_column not in reader.fieldnames:
+                raise ValueError(f"Column '{barcode_column}' not found in {input_file}")
+            
+            for row in reader:
+                key = row[key_column]
+                barcode = row[barcode_column]
+                
+                if key and barcode:  # Skip empty values
+                    key_barcodes[key].add(barcode)
+        
+        # Convert to counts
+        counts = {key: len(barcodes) for key, barcodes in key_barcodes.items()}
+        logger.debug(
+            f"Aggregated {sum(counts.values())} unique barcodes across {len(counts)} keys"
+        )
+        return counts
+    else:
+        # Count occurrences of each key
+        key_counts: Dict[str, int] = defaultdict(int)
+        
+        with open(input_file, "r") as f:
+            reader = csv.DictReader(f, delimiter=sep)
+            
+            if key_column not in reader.fieldnames:
+                raise ValueError(f"Column '{key_column}' not found in {input_file}")
+            
+            for row in reader:
+                key = row[key_column]
+                
+                if key:  # Skip empty values
+                    key_counts[key] += 1
+        
+        counts = dict(key_counts)
+        logger.debug(
+            f"Counted {sum(counts.values())} total occurrences across {len(counts)} keys"
+        )
+        return counts
 
 
 class UMIStats(BaseStatistic):
@@ -190,13 +272,13 @@ class GiniCoefficient(UMIStats):
         Parameters
         ----------
         input_file : str
-            Path to input CSV file
+            Path to collapse output CSV file
         sep : str, default=','
             CSV separator
         **step_params : Any
             Should include:
-            - key_column: str - Column containing keys
-            - barcode_column: str (optional) - Column for grouping/counting
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
             - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
@@ -208,7 +290,7 @@ class GiniCoefficient(UMIStats):
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
         allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", True)
+        use_corrected = step_params.get("use_corrected", False)  # No correction needed, data is pre-collapsed
 
         if not key_column:
             raise ValueError("key_column is required for GiniCoefficient")
@@ -218,14 +300,18 @@ class GiniCoefficient(UMIStats):
         if allowed_list_path:
             allowed_list = _read_allowed_list(allowed_list_path)
 
-        # Create UMI object from CSV
-        umi = UMI.from_csv(
-            filepath=input_file,
-            column=key_column,
-            sep=sep,
-            correct=False,
-            count_column=barcode_column,
-        )
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        # Set mapping for pre-collapsed data (each key maps to itself)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
@@ -328,13 +414,13 @@ class ShannonDiversity(UMIStats):
         Parameters
         ----------
         input_file : str
-            Path to input CSV file
+            Path to collapse output CSV file
         sep : str, default=','
             CSV separator
         **step_params : Any
             Should include:
-            - key_column: str - Column containing keys
-            - barcode_column: str (optional) - Column for grouping/counting
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
             - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
             - base: float (optional) - Base for logarithm (default 2.0)
@@ -347,7 +433,7 @@ class ShannonDiversity(UMIStats):
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
         allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", True)
+        use_corrected = step_params.get("use_corrected", False)
         base = step_params.get("base", 2.0)
 
         if not key_column:
@@ -358,14 +444,17 @@ class ShannonDiversity(UMIStats):
         if allowed_list_path:
             allowed_list = _read_allowed_list(allowed_list_path)
 
-        # Create UMI object from CSV
-        umi = UMI.from_csv(
-            filepath=input_file,
-            column=key_column,
-            sep=sep,
-            correct=False,
-            count_column=barcode_column,
-        )
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list, base=base)
 
@@ -461,13 +550,13 @@ class SimpsonDiversity(UMIStats):
         Parameters
         ----------
         input_file : str
-            Path to input CSV file
+            Path to collapse output CSV file
         sep : str, default=','
             CSV separator
         **step_params : Any
             Should include:
-            - key_column: str - Column containing keys
-            - barcode_column: str (optional) - Column for grouping/counting
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
             - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
@@ -479,7 +568,7 @@ class SimpsonDiversity(UMIStats):
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
         allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", True)
+        use_corrected = step_params.get("use_corrected", False)
 
         if not key_column:
             raise ValueError("key_column is required for SimpsonDiversity")
@@ -489,14 +578,17 @@ class SimpsonDiversity(UMIStats):
         if allowed_list_path:
             allowed_list = _read_allowed_list(allowed_list_path)
 
-        # Create UMI object from CSV
-        umi = UMI.from_csv(
-            filepath=input_file,
-            column=key_column,
-            sep=sep,
-            correct=False,
-            count_column=barcode_column,
-        )
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
@@ -582,8 +674,8 @@ class UMIRecoveryRate(UMIStats):
             CSV separator
         **step_params : Any
             Should include:
-            - key_column: str - Column containing keys
-            - barcode_column: str (optional) - Column for grouping/counting
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
             - allowed_list: str - Path to allowed list file (required)
             - use_corrected: bool (optional) - Whether to use corrected counts
 
@@ -595,7 +687,7 @@ class UMIRecoveryRate(UMIStats):
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
         allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", True)
+        use_corrected = step_params.get("use_corrected", False)
 
         if not key_column:
             raise ValueError("key_column is required for UMIRecoveryRate")
@@ -605,14 +697,17 @@ class UMIRecoveryRate(UMIStats):
         # Load allowed list
         allowed_list = _read_allowed_list(allowed_list_path)
 
-        # Create UMI object from CSV
-        umi = UMI.from_csv(
-            filepath=input_file,
-            column=key_column,
-            sep=sep,
-            correct=False,
-            count_column=barcode_column,
-        )
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
@@ -710,8 +805,8 @@ class UMIEfficiencyRate(UMIStats):
             CSV separator
         **step_params : Any
             Should include:
-            - key_column: str - Column containing keys
-            - barcode_column: str (optional) - Column for grouping/counting
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
             - allowed_list: str - Path to allowed list file (required)
             - use_corrected: bool (optional) - Whether to use corrected counts
 
@@ -723,7 +818,7 @@ class UMIEfficiencyRate(UMIStats):
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
         allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", True)
+        use_corrected = step_params.get("use_corrected", False)
 
         if not key_column:
             raise ValueError("key_column is required for UMIEfficiencyRate")
@@ -733,14 +828,17 @@ class UMIEfficiencyRate(UMIStats):
         # Load allowed list
         allowed_list = _read_allowed_list(allowed_list_path)
 
-        # Create UMI object from CSV
-        umi = UMI.from_csv(
-            filepath=input_file,
-            column=key_column,
-            sep=sep,
-            correct=False,
-            count_column=barcode_column,
-        )
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
@@ -927,8 +1025,8 @@ class UMIRedundancy(UMIStats):
             CSV separator
         **step_params : Any
             Should include:
-            - key_column: str - Column containing keys
-            - barcode_column: str (optional) - Column for grouping/counting
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
             - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
@@ -940,7 +1038,7 @@ class UMIRedundancy(UMIStats):
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
         allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", True)
+        use_corrected = step_params.get("use_corrected", False)
 
         if not key_column:
             raise ValueError("key_column is required for UMIRedundancy")
@@ -950,14 +1048,17 @@ class UMIRedundancy(UMIStats):
         if allowed_list_path:
             allowed_list = _read_allowed_list(allowed_list_path)
 
-        # Create UMI object from CSV
-        umi = UMI.from_csv(
-            filepath=input_file,
-            column=key_column,
-            sep=sep,
-            correct=False,
-            count_column=barcode_column,
-        )
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 

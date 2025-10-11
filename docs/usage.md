@@ -61,7 +61,7 @@ outerspace count -c config.toml \
   --key-rescue --key-min-score 17 --key-match-score 1 \
   --key-mismatch-penalty -1 --key-gap-penalty -3
 
-# Calculate statistics (uses config settings)
+# Calculate statistics (uses config settings - requires [[stats.metrics]] sections)
 outerspace stats -c config.toml ctrl_counts.csv exp_counts.csv
 
 # Visualize results
@@ -133,7 +133,7 @@ outerspace collapse -c config.toml --input-file viral_barcodes.csv --output-file
 # Count barcodes per sample (uses config settings)
 outerspace count -c config.toml --input-file corrected_barcodes.csv --output-file barcode_counts.csv
 
-# Analyze distribution (uses config settings)
+# Analyze distribution (uses config settings - requires [[stats.metrics]] sections)
 outerspace stats -c config.toml barcode_counts.csv
 ```
 

@@ -7,6 +7,72 @@ Unique Molecular Identifiers (UMIs) are short random sequences used to tag and i
 - Understanding the complexity and diversity of the sample
 - Validating the effectiveness of UMI error correction
 
+## Configuration-Driven Statistics
+
+The `stats` command uses a configuration-driven approach where each metric is defined separately with its own parameters. The command reads **collapse output** (not count output) and aggregates the data as needed for each statistic.
+
+### Data Aggregation
+
+The stats command works with collapse output and aggregates the data in two ways:
+
+1. **Key occurrence counting** (if only `key_column` is specified): Counts how many times each key value appears. This is useful for counting reads per sequence.
+
+2. **Unique barcode counting** (if both `key_column` and `barcode_column` are specified): Counts how many unique values exist in the barcode column for each key. This is useful for counting unique UMIs per sequence.
+
+### Basic Configuration
+
+Statistics are defined in the configuration file using `[[stats.metrics]]` sections. Each section specifies:
+
+- `method`: The statistical method to use
+- `key_column`: Column containing the keys/sequences to analyze
+- `barcode_column`: (Optional) Column for counting unique values per key
+- `name`: A custom name for the output column
+- Additional parameters specific to each method
+
+### Example Configuration
+
+```toml
+# Count unique UMIs per corrected sequence
+[[stats.metrics]]
+method = "simpson_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "protospacer_simpson"
+
+# Count reads per corrected sequence  
+[[stats.metrics]]
+method = "shannon_diversity"
+key_column = "protospacer_corrected"
+name = "protospacer_shannon_reads"
+
+# Calculate error rate by comparing columns
+[[stats.metrics]]
+method = "error_rate"
+original_column = "protospacer"
+corrected_column = "protospacer_corrected"
+name = "protospacer_error"
+```
+
+### Available Methods
+
+- `gini_coefficient`: Gini coefficient calculation
+- `shannon_diversity`: Shannon diversity index (supports `base` parameter)
+- `simpson_diversity`: Simpson's diversity index
+- `umi_recovery_rate`: UMI recovery rate (requires `allowed_list`)
+- `umi_efficiency_rate`: UMI efficiency rate (requires `allowed_list`)
+- `umi_redundancy`: UMI redundancy metric
+- `error_rate`: Error rate from comparing two columns
+
+### Common Parameters
+
+- `key_column`: Column containing the keys to analyze (required for most metrics)
+- `barcode_column`: Optional column for grouping/counting
+- `allowed_list`: Path to file containing allowed values (required for some metrics)
+- `use_corrected`: Whether to use corrected counts (default: true)
+- `base`: Logarithm base for Shannon diversity (default: 2.0)
+- `original_column`: Original values column (for error_rate)
+- `corrected_column`: Corrected values column (for error_rate)
+
 ## Key Metrics
 
 Here are important statistical metrics for analyzing UMI distributions:

@@ -495,12 +495,12 @@ def test_workflow_with_config(temp_workspace):
     # Verify merge output
     assert os.path.exists(os.path.join(temp_workspace, "merged_counts.csv"))
 
-    # Step 5: Run stats command using config
+    # Step 5: Run stats command using config (operates on collapse files)
     stats_args = [
         "stats",
-        os.path.join(temp_workspace, "count/shuffle.csv"),
-        os.path.join(temp_workspace, "count/M1-lib.csv"),
-        os.path.join(temp_workspace, "count/M2-lib.csv"),
+        os.path.join(temp_workspace, "collapse/shuffle.csv"),
+        os.path.join(temp_workspace, "collapse/M1-lib.csv"),
+        os.path.join(temp_workspace, "collapse/M2-lib.csv"),
         "--config",
         os.path.join(temp_workspace, "grnaquery.toml"),
     ]
