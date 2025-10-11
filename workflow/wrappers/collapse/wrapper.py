@@ -24,6 +24,7 @@ args = [
     '--input-file', input_file,
     '--output-file', output_file,
     '-c', toml_file,
+    '--threads', str(snakemake.threads),
 ]
 
 # Run the collapse command

@@ -774,4 +774,389 @@ min_score = 0
             assert rescued, "key2 should have been found and rescued to key1"
 
 
+# ============================================================================
+# Multithreading Tests
+# ============================================================================
+
+def test_collapse_with_threads_parameter():
+    """Test collapse command with --threads parameter"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test input file
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi\n")
+            f.write("key1,AAA\n")
+            f.write("key1,AAA\n")
+            f.write("kayX,BBB\n")  # Near-miss for key1
+            f.write("other,CCC\n")
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+            f.write("other\n")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "collapse",
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+            "--columns",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--method",
+            "nearest",
+            "--min-score",
+            "0",
+            "--threads",
+            "2",
+        ]
+        cli = Cli(args)
+        
+        # Verify threads parameter is set
+        assert cli.args.threads == 2
+        
+        cli.run()
+
+        # Verify output file exists and has corrected column
+        assert os.path.exists(output_file)
+        with open(output_file, "r") as f:
+            content = f.read()
+            assert "protospacer_corrected" in content
+
+
+def test_collapse_threads_default_value():
+    """Test that threads parameter defaults to 1"""
+    args = [
+        "collapse",
+        "--input-file",
+        "test.csv",
+        "--output-file",
+        "output.csv",
+        "--columns",
+        "umi",
+    ]
+    cli = Cli(args)
+    assert cli.args.threads == 1
+
+
+def test_collapse_with_threads_consistency():
+    """Test that results are consistent with different thread counts"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test input file with multiple rows
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi\n")
+            for i in range(20):
+                f.write(f"key{i % 3},UMI{i:02d}\n")
+            # Add some near-misses
+            f.write("kay1,UMI99\n")  # Near key1
+            f.write("kay2,UMI98\n")  # Near key2
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key0\n")
+            f.write("key1\n")
+            f.write("key2\n")
+
+        # Run with threads=1
+        output_file_1 = os.path.join(temp_dir, "output1.csv")
+        args_1 = [
+            "collapse",
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file_1,
+            "--columns",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--method",
+            "nearest",
+            "--min-score",
+            "0",
+            "--threads",
+            "1",
+        ]
+        cli_1 = Cli(args_1)
+        cli_1.run()
+
+        # Run with threads=4
+        output_file_4 = os.path.join(temp_dir, "output4.csv")
+        args_4 = [
+            "collapse",
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file_4,
+            "--columns",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--method",
+            "nearest",
+            "--min-score",
+            "0",
+            "--threads",
+            "4",
+        ]
+        cli_4 = Cli(args_4)
+        cli_4.run()
+
+        # Read both outputs and compare
+        with open(output_file_1, "r") as f:
+            content_1 = f.read()
+        with open(output_file_4, "r") as f:
+            content_4 = f.read()
+
+        # Results should be identical
+        assert content_1 == content_4
+
+
+def test_collapse_with_threads_in_config():
+    """Test that threads parameter can be specified in config file"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create config file with threads
+        config_file = os.path.join(temp_dir, "config.toml")
+        with open(config_file, "w") as f:
+            f.write("""[collapse]
+threads = 3
+method = "nearest"
+min_score = 0
+""")
+
+        # Create test input file
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi\n")
+            f.write("key1,AAA\n")
+            f.write("other,BBB\n")
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+            f.write("other\n")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "collapse",
+            "--config",
+            config_file,
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+            "--columns",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+        ]
+        cli = Cli(args)
+        cli.run()
+        
+        # Verify config was loaded
+        assert cli.args.threads == 3
+
+        # Verify output file exists
+        assert os.path.exists(output_file)
+
+
+def test_collapse_threads_cli_overrides_config():
+    """Test that CLI --threads parameter overrides config file"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create config file with threads=2
+        config_file = os.path.join(temp_dir, "config.toml")
+        with open(config_file, "w") as f:
+            f.write("""[collapse]
+threads = 2
+method = "nearest"
+min_score = 0
+""")
+
+        # Create test input file
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi\n")
+            f.write("key1,AAA\n")
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key1\n")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "collapse",
+            "--config",
+            config_file,
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+            "--columns",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--threads",
+            "5",  # Override config
+        ]
+        cli = Cli(args)
+        
+        # Verify CLI arg took precedence
+        assert cli.args.threads == 5
+
+
+def test_collapse_with_threads_in_steps():
+    """Test collapse with threads parameter in steps mode"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create input file
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,umi\n")
+            for i in range(10):
+                f.write(f"key{i % 2},UMI{i:02d}\n")
+            f.write("kay1,UMI99\n")  # Near key1
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key0\n")
+            f.write("key1\n")
+
+        # Create config file with steps and threads
+        config_file = os.path.join(temp_dir, "config.toml")
+        with open(config_file, "w") as f:
+            f.write("""
+[[collapse.steps]]
+name = "protospacer_correction"
+columns = "protospacer"
+method = "nearest"
+allowed_list = "allowed.txt"
+threads = 3
+min_score = 0
+""")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        args = [
+            "collapse",
+            "--config",
+            config_file,
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        # Verify output file exists
+        assert os.path.exists(output_file)
+        with open(output_file, "r") as f:
+            content = f.read()
+            assert "protospacer_corrected" in content
+
+
+def test_collapse_threads_with_directory_mode():
+    """Test collapse with threads in directory mode"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create input directory with multiple files
+        input_dir = os.path.join(temp_dir, "input")
+        os.makedirs(input_dir)
+        
+        for file_num in range(3):
+            input_file = os.path.join(input_dir, f"test{file_num}.csv")
+            with open(input_file, "w") as f:
+                f.write("protospacer,umi\n")
+                f.write(f"key{file_num},AAA\n")
+                f.write(f"kay{file_num},BBB\n")  # Near-miss
+
+        # Create allowed list file
+        allowed_list = os.path.join(temp_dir, "allowed.txt")
+        with open(allowed_list, "w") as f:
+            f.write("key0\n")
+            f.write("key1\n")
+            f.write("key2\n")
+
+        # Create output directory
+        output_dir = os.path.join(temp_dir, "output")
+
+        args = [
+            "collapse",
+            "--input-dir",
+            input_dir,
+            "--output-dir",
+            output_dir,
+            "--columns",
+            "protospacer",
+            "--allowed-list",
+            allowed_list,
+            "--method",
+            "nearest",
+            "--min-score",
+            "0",
+            "--threads",
+            "2",
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        # Verify output files exist
+        for file_num in range(3):
+            output_file = os.path.join(output_dir, f"test{file_num}.csv")
+            assert os.path.exists(output_file)
+
+
+def test_collapse_threads_only_affects_nearest_method():
+    """Test that threads parameter is only used with method=nearest"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test input file
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("umi3,umi5\n")
+            f.write("AAA,CCC\n")
+            f.write("AAT,CCC\n")  # One mismatch from AAA
+            f.write("GGG,TTT\n")
+
+        # Create output file path
+        output_file = os.path.join(temp_dir, "output.csv")
+
+        # Test with directional method (threads shouldn't affect it)
+        args = [
+            "collapse",
+            "--input-file",
+            input_file,
+            "--output-file",
+            output_file,
+            "--columns",
+            "umi3,umi5",
+            "--mismatches",
+            "1",
+            "--method",
+            "directional",
+            "--threads",
+            "4",  # This should be ignored for directional method
+        ]
+        cli = Cli(args)
+        cli.run()
+
+        # Verify output file exists
+        assert os.path.exists(output_file)
+        with open(output_file, "r") as f:
+            content = f.read()
+            assert "umi3_umi5_corrected" in content
+
+
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

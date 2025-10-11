@@ -162,6 +162,14 @@ class CollapseCommand(BaseCommand):
             help="Strategy to choose the best match when multiple are found (default: random). For use with --method nearest.",
         )
         
+        # Threading options
+        parser.add_argument(
+            "--threads",
+            type=int,
+            default=1,
+            help="Number of threads for parallel processing (default: 1). For use with --method nearest.",
+        )
+        
         self._add_common_args(parser)
 
     def _parse_columns(self, columns_str: str) -> List[str]:
@@ -225,6 +233,7 @@ class CollapseCommand(BaseCommand):
         rescue_kmer_size: Optional[int] = None,
         rescue_min_overlap: Optional[int] = None,
         rescue_strategy: Optional[str] = None,
+        threads: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Process a single CSV file and return metrics.
 
@@ -269,6 +278,8 @@ class CollapseCommand(BaseCommand):
             Minimum k-mer overlap for prescreening
         rescue_strategy : Optional[str], default=None
             Strategy for choosing among multiple matches
+        threads : Optional[int], default=None
+            Number of threads for parallel processing (for method='nearest')
 
         Returns
         -------
@@ -335,44 +346,85 @@ class CollapseCommand(BaseCommand):
                 )
             
             corrected_rows = []
-            desc = "Exact matching with allowed list" if method == "allowed" else "Nearest-neighbor matching"
-            for row in tqdm(rows, desc=desc):
-                corrected_row = row.copy()
-                value = str(row.get(column, ""))
+            
+            if method == "nearest" and finder:
+                # Use batch processing for nearest-neighbor matching
+                desc = "Nearest-neighbor matching (batch)"
                 
-                if not value:
-                    corrected_row[corrected_col_name] = ""
-                elif value in allowed_keys_set:
-                    # Exact match
-                    corrected_row[corrected_col_name] = value
-                elif method == "nearest" and finder:
-                    # Attempt rescue with nearest-neighbor matching
-                    mapped_values = finder.find(value)
-                    if mapped_values:
-                        if len(mapped_values) == 1:
-                            corrected_row[corrected_col_name] = mapped_values[0]
-                            rescued_count += 1
-                        else:
-                            multiple_rescued_count += 1
-                            # Use strategy to choose one
-                            strategy = rescue_strategy if rescue_strategy is not None else "random"
-                            if strategy == "random":
-                                corrected_row[corrected_col_name] = random.choice(mapped_values)
-                            elif strategy == "first":
-                                corrected_row[corrected_col_name] = mapped_values[0]
-                            elif strategy == "last":
-                                corrected_row[corrected_col_name] = mapped_values[-1]
-                            else:
-                                corrected_row[corrected_col_name] = mapped_values[0]
-                            rescued_count += 1
+                # First pass: identify exact matches and collect rescue candidates
+                rescue_indices = []
+                rescue_values = []
+                
+                for i, row in enumerate(tqdm(rows, desc="Identifying rescue candidates")):
+                    value = str(row.get(column, ""))
+                    if not value or value in allowed_keys_set:
+                        # Exact match or empty - no rescue needed
+                        pass
                     else:
-                        # No rescue found, set to empty
-                        corrected_row[corrected_col_name] = ""
-                else:
-                    # method=='allowed' and not in allowed list, set to empty
-                    corrected_row[corrected_col_name] = ""
+                        # Need rescue
+                        rescue_indices.append(i)
+                        rescue_values.append(value)
                 
-                corrected_rows.append(corrected_row)
+                # Batch process rescue values using find_many
+                rescue_results = {}
+                if rescue_values:
+                    num_threads = threads if threads is not None else 1
+                    logger.info(f"Processing {len(rescue_values)} rescue candidates with {num_threads} threads")
+                    results = finder.find_many(rescue_values, threads=num_threads)
+                    rescue_results = dict(zip(rescue_values, results))
+                
+                # Second pass: apply corrections
+                for row in tqdm(rows, desc="Applying corrections"):
+                    corrected_row = row.copy()
+                    value = str(row.get(column, ""))
+                    
+                    if not value:
+                        corrected_row[corrected_col_name] = ""
+                    elif value in allowed_keys_set:
+                        # Exact match
+                        corrected_row[corrected_col_name] = value
+                    else:
+                        # Check rescue results
+                        mapped_values = rescue_results.get(value)
+                        if mapped_values:
+                            if len(mapped_values) == 1:
+                                corrected_row[corrected_col_name] = mapped_values[0]
+                                rescued_count += 1
+                            else:
+                                multiple_rescued_count += 1
+                                # Use strategy to choose one
+                                strategy = rescue_strategy if rescue_strategy is not None else "random"
+                                if strategy == "random":
+                                    corrected_row[corrected_col_name] = random.choice(mapped_values)
+                                elif strategy == "first":
+                                    corrected_row[corrected_col_name] = mapped_values[0]
+                                elif strategy == "last":
+                                    corrected_row[corrected_col_name] = mapped_values[-1]
+                                else:
+                                    corrected_row[corrected_col_name] = mapped_values[0]
+                                rescued_count += 1
+                        else:
+                            # No rescue found, set to empty
+                            corrected_row[corrected_col_name] = ""
+                    
+                    corrected_rows.append(corrected_row)
+            else:
+                # Method is 'allowed' - use simple exact matching
+                desc = "Exact matching with allowed list"
+                for row in tqdm(rows, desc=desc):
+                    corrected_row = row.copy()
+                    value = str(row.get(column, ""))
+                    
+                    if not value:
+                        corrected_row[corrected_col_name] = ""
+                    elif value in allowed_keys_set:
+                        # Exact match
+                        corrected_row[corrected_col_name] = value
+                    else:
+                        # method=='allowed' and not in allowed list, set to empty
+                        corrected_row[corrected_col_name] = ""
+                    
+                    corrected_rows.append(corrected_row)
             
             if method == "nearest":
                 logger.info(f"Values rescued (mapped to allowed list): {rescued_count}")
@@ -600,6 +652,7 @@ class CollapseCommand(BaseCommand):
                         rescue_kmer_size=step.get("rescue_kmer_size", 3),
                         rescue_min_overlap=step.get("rescue_min_overlap", 1),
                         rescue_strategy=step.get("rescue_strategy", "random"),
+                        threads=step.get("threads", self.args.threads if hasattr(self.args, "threads") else 1),
                     )
                 else:
                     # Directory mode
@@ -634,6 +687,7 @@ class CollapseCommand(BaseCommand):
                             rescue_kmer_size=step.get("rescue_kmer_size", 3),
                             rescue_min_overlap=step.get("rescue_min_overlap", 1),
                             rescue_strategy=step.get("rescue_strategy", "random"),
+                            threads=step.get("threads", self.args.threads if hasattr(self.args, "threads") else 1),
                         )
                 
                 logger.info(f"Step {step_num} complete")
@@ -713,6 +767,7 @@ class CollapseCommand(BaseCommand):
             "sep": ",",
             "method": "directional",
             "row_limit": None,
+            "threads": 1,
         }
         self._merge_config_and_args(defaults)
 
@@ -771,6 +826,7 @@ class CollapseCommand(BaseCommand):
                     rescue_kmer_size=self.args.rescue_kmer_size,
                     rescue_min_overlap=self.args.rescue_min_overlap,
                     rescue_strategy=self.args.rescue_strategy,
+                    threads=self.args.threads,
                 )
 
                 # Print metrics
@@ -839,6 +895,7 @@ class CollapseCommand(BaseCommand):
                     rescue_kmer_size=self.args.rescue_kmer_size,
                     rescue_min_overlap=self.args.rescue_min_overlap,
                     rescue_strategy=self.args.rescue_strategy,
+                    threads=self.args.threads,
                 )
 
                 # Store metrics for this file
