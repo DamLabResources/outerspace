@@ -30,6 +30,10 @@ pattern_names = ["UMI_5prime", "protospacer", "UMI_3prime"]
 # Alternative: use_all_patterns = true
 matches_only = true
 
+[collapse]
+threads = 8
+
+
 # Iterative collapse steps (recommended approach)
 [[collapse.steps]]
 name = "umi_correction"
@@ -46,7 +50,7 @@ mismatch_penalty = -1
 gap_penalty = -2
 match_score = 0
 min_score = -3
-rescue_strategy = "random"
+rescue_strategy = "all"
 rescue_kmer_size = 3
 rescue_min_overlap = 8
 

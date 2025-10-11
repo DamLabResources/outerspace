@@ -276,4 +276,256 @@ def test_score_consistency():
     assert result_strict is None
 
 
+# ============================================================================
+# Multithreading Tests
+# ============================================================================
+
+def test_find_many_single_threaded():
+    """Test find_many with single thread (threads=1)"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = ("ATCG", "GCTA", "TTAA", "CCGG")
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=2,
+    )
+    
+    queries = ["ATCG", "ATCC", "GCTA", "NNNN"]
+    results = finder.find_many(queries, threads=1)
+    
+    assert len(results) == 4
+    assert results[0] == ["ATCG"]  # Exact match
+    assert results[1] == ["ATCG"]  # Close match
+    assert results[2] == ["GCTA"]  # Exact match
+    assert results[3] is None  # No match
+
+
+def test_find_many_multithreaded():
+    """Test find_many with multiple threads"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = ("ATCG", "GCTA", "TTAA", "CCGG")
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=2,
+    )
+    
+    queries = ["ATCG", "ATCC", "GCTA", "NNNN"]
+    results = finder.find_many(queries, threads=2)
+    
+    assert len(results) == 4
+    assert results[0] == ["ATCG"]  # Exact match
+    assert results[1] == ["ATCG"]  # Close match
+    assert results[2] == ["GCTA"]  # Exact match
+    assert results[3] is None  # No match
+
+
+def test_find_many_consistency_single_vs_multi():
+    """Test that single-threaded and multi-threaded give same results"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = tuple(f"{'A' * i}{'T' * (8-i)}" for i in range(9))
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=0,
+    )
+    
+    # Create a diverse set of queries
+    queries = [
+        "AAAAAAAA", "ATATATAT", "TTTTTTTT", "AAAATTTT",
+        "AATTAATT", "GGGGGGGG", "CCCCCCCC", "ACGTACGT"
+    ] * 5  # Repeat to have enough queries for good parallelism
+    
+    # Run with single thread
+    results_single = finder.find_many(queries, threads=1)
+    
+    # Run with multiple threads
+    results_multi = finder.find_many(queries, threads=4)
+    
+    # Results should be identical
+    assert len(results_single) == len(results_multi)
+    for i, (r_single, r_multi) in enumerate(zip(results_single, results_multi)):
+        assert r_single == r_multi, f"Mismatch at index {i}: {r_single} != {r_multi}"
+
+
+def test_find_many_with_batch_size():
+    """Test find_many with custom batch_size parameter"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = ("ATCG", "GCTA", "TTAA", "CCGG")
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=2,
+    )
+    
+    queries = ["ATCG", "ATCC", "GCTA", "NNNN"] * 10  # 40 queries
+    
+    # Test with different batch sizes
+    results_batch_1 = finder.find_many(queries, threads=2, batch_size=1)
+    results_batch_5 = finder.find_many(queries, threads=2, batch_size=5)
+    results_batch_10 = finder.find_many(queries, threads=2, batch_size=10)
+    
+    # All should give the same results
+    assert results_batch_1 == results_batch_5 == results_batch_10
+
+
+def test_find_many_large_dataset():
+    """Test find_many with larger dataset to verify parallel speedup"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    # Create a larger allowed list
+    allowed_umis = tuple(f"{'ACGT'[i%4] * 2}{j:04b}".replace('0', 'A').replace('1', 'T') 
+                        for i in range(4) for j in range(16))
+    
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=0,
+        use_prescreen=True,
+    )
+    
+    # Create many queries
+    queries = [allowed_umis[i % len(allowed_umis)] for i in range(100)]
+    
+    # Both should work and give same results
+    results_single = finder.find_many(queries, threads=1)
+    results_multi = finder.find_many(queries, threads=4)
+    
+    assert len(results_single) == len(results_multi) == 100
+    assert results_single == results_multi
+
+
+def test_find_many_empty_queries():
+    """Test find_many with empty query list"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = ("ATCG", "GCTA")
+    finder = NearestUMIFinder(allowed_list=allowed_umis)
+    
+    results = finder.find_many([], threads=2)
+    assert results == []
+
+
+def test_find_many_with_prescreen_disabled():
+    """Test find_many with k-mer prescreening disabled (exhaustive search)"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = ("ATCG", "GCTA", "TTAA", "CCGG")
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=2,
+        use_prescreen=False,  # Disable k-mer prescreen
+    )
+    
+    queries = ["ATCG", "ATCC", "GCTA"]
+    
+    # Should work with both single and multi-threaded
+    results_single = finder.find_many(queries, threads=1)
+    results_multi = finder.find_many(queries, threads=2)
+    
+    assert results_single == results_multi
+    assert results_single[0] == ["ATCG"]
+    assert results_single[1] == ["ATCG"]
+    assert results_single[2] == ["GCTA"]
+
+
+def test_static_find_impl():
+    """Test the static _find_impl method directly"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis_tuple = ("ATCG", "GCTA", "TTAA")
+    allowed_set = set(allowed_umis_tuple)
+    kmer_sets = {umi: NearestUMIFinder._kmerize_static(umi, 3) for umi in allowed_umis_tuple}
+    
+    # Test exact match
+    result = NearestUMIFinder._find_impl(
+        query_umi="ATCG",
+        allowed_umis_tuple=allowed_umis_tuple,
+        allowed_set=allowed_set,
+        kmer_sets=kmer_sets,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=0,
+        use_prescreen=True,
+        kmer_size=3,
+        min_kmer_overlap=1,
+    )
+    assert result == ["ATCG"]
+    
+    # Test close match
+    result = NearestUMIFinder._find_impl(
+        query_umi="ATCC",
+        allowed_umis_tuple=allowed_umis_tuple,
+        allowed_set=allowed_set,
+        kmer_sets=kmer_sets,
+        mismatch_penalty=-1,
+        gap_penalty=-3,
+        match_score=1,
+        min_score=2,
+        use_prescreen=True,
+        kmer_size=3,
+        min_kmer_overlap=1,
+    )
+    assert result == ["ATCG"]
+
+
+def test_kmerize_static():
+    """Test the static _kmerize_static method"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    # Test normal case
+    kmers = NearestUMIFinder._kmerize_static("ATCG", 3)
+    assert kmers == frozenset(["ATC", "TCG"])
+    
+    # Test short sequence
+    kmers = NearestUMIFinder._kmerize_static("AT", 3)
+    assert kmers == frozenset(["AT"])
+    
+    # Test empty sequence
+    kmers = NearestUMIFinder._kmerize_static("", 3)
+    assert kmers == frozenset([""])
+    
+    # Test k=0
+    kmers = NearestUMIFinder._kmerize_static("ATCG", 0)
+    assert kmers == frozenset()
+
+
+def test_find_many_preserves_order():
+    """Test that find_many preserves the order of queries"""
+    from outerspace.nearest import NearestUMIFinder
+    
+    allowed_umis = ("AAAA", "TTTT", "GGGG", "CCCC")
+    finder = NearestUMIFinder(
+        allowed_list=allowed_umis,
+        min_score=3,
+    )
+    
+    queries = ["AAAA", "TTTT", "GGGG", "CCCC", "AAAA", "TTTT"]
+    
+    results_single = finder.find_many(queries, threads=1)
+    results_multi = finder.find_many(queries, threads=3)
+    
+    # Check order is preserved
+    assert results_single == [["AAAA"], ["TTTT"], ["GGGG"], ["CCCC"], ["AAAA"], ["TTTT"]]
+    assert results_multi == results_single
+
+
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

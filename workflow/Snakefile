@@ -95,6 +95,7 @@ rule collapse:
         toml = get_toml_file
     output:
         'collapse/{sample}.csv'
+    threads: config.get('collapse_threads', 1)
     script:
         'wrappers/collapse/wrapper.py'
 
