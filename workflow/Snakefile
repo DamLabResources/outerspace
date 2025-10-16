@@ -120,3 +120,19 @@ rule stats:
         'stats/stats.csv'
     script:
         'wrappers/stats/wrapper.py'
+
+
+rule subsample:
+    input:
+        csv = 'collapse/{sample}.csv',
+        toml = get_toml_file
+    output:
+        'subsample/{sample}.csv'
+    threads: config.get('subsample_threads', 1)
+    script:
+        'wrappers/subsample/wrapper.py'
+
+
+rule subsample_all:
+    input:
+        expand('subsample/{sample}.csv', sample=SAMPLES.index)
