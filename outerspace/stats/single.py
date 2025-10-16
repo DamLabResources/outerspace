@@ -777,7 +777,7 @@ class UMIRecoveryRate(UMIStats):
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None, # This allowed list should stay
+        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize UMI recovery rate calculator.
 
@@ -793,7 +793,21 @@ class UMIRecoveryRate(UMIStats):
             If not provided, assumes exponential distribution and calculates
             theoretical recovery rate.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
+        self.allowed_list = allowed_list
+    
+    @property
+    def _allowed_list(self) -> Optional[List[bytes]]:
+        """Get allowed list in bytes format.
+
+        Returns
+        -------
+        Optional[List[bytes]]
+            Allowed list converted to bytes, or None if not provided
+        """
+        if self.allowed_list:
+            return [umi.encode("ascii") for umi in self.allowed_list]
+        return None
 
     @staticmethod
     def calculate_recovery_rate_limited(
@@ -910,7 +924,21 @@ class UMIEfficiencyRate(UMIStats):
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
+        self.allowed_list = allowed_list
+    
+    @property
+    def _allowed_list(self) -> Optional[List[bytes]]:
+        """Get allowed list in bytes format.
+
+        Returns
+        -------
+        Optional[List[bytes]]
+            Allowed list converted to bytes, or None if not provided
+        """
+        if self.allowed_list:
+            return [umi.encode("ascii") for umi in self.allowed_list]
+        return None
 
     @staticmethod
     def calculate_efficiency_rate(
