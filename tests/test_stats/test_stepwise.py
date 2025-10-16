@@ -287,5 +287,34 @@ def test_error_rate_missing_params(simple_csv_file):
         )
 
 
+def test_error_rate_max_items(error_rate_csv_file):
+    """Test ErrorRate._from_step with max_items parameter"""
+    # Process all items
+    result_all = ErrorRate._from_step(
+        error_rate_csv_file,
+        original_column="original",
+        corrected_column="corrected"
+    )
+    
+    # Process only first 3 items
+    result_limited = ErrorRate._from_step(
+        error_rate_csv_file,
+        original_column="original",
+        corrected_column="corrected",
+        max_items=3
+    )
+    
+    assert result_all is not None
+    assert result_limited is not None
+    
+    # Both should be between 0 and 1
+    assert 0 <= result_all <= 1
+    assert 0 <= result_limited <= 1
+    
+    # The results should be different because we're processing different numbers of rows
+    # (unless by chance they have the same error rate)
+    # We can't assert they're different, but we can verify both work
+
+
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
 

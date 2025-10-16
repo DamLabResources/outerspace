@@ -129,6 +129,7 @@ corrected_column = "protospacer_corrected"
 mismatch_penalty = -1  # Optional: penalty for mismatches (default: -1)
 gap_penalty = -3       # Optional: penalty for gaps (default: -3)
 match_score = 1        # Optional: score for matches (default: 1)
+max_items = 10000      # Optional: process only first N items for performance (default: None, process all)
 name = "protospacer_error_rate"
 
 [owner]

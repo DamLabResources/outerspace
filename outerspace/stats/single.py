@@ -1089,6 +1089,7 @@ class ErrorRate(BaseStatistic):
             - mismatch_penalty: int - Penalty for mismatches (default: -1)
             - gap_penalty: int - Penalty for gaps (default: -3)
             - match_score: int - Score for matches (default: 1)
+            - max_items: int - Maximum number of items to process (default: None, process all)
 
         Returns
         -------
@@ -1102,12 +1103,16 @@ class ErrorRate(BaseStatistic):
         
         This uses the alignment scoring system from NearestUMIFinder, which accounts
         for mismatches and gaps more accurately than simple Hamming distance.
+        
+        When max_items is specified, only the first max_items rows will be processed,
+        which can significantly improve performance for large datasets.
         """
         original_column = step_params.get("original_column")
         corrected_column = step_params.get("corrected_column")
         mismatch_penalty = step_params.get("mismatch_penalty", -1)
         gap_penalty = step_params.get("gap_penalty", -3)
         match_score = step_params.get("match_score", 1)
+        max_items = step_params.get("max_items")
 
         if not original_column or not corrected_column:
             raise ValueError("Both original_column and corrected_column are required for ErrorRate")
@@ -1125,6 +1130,11 @@ class ErrorRate(BaseStatistic):
                 raise ValueError(f"Column '{corrected_column}' not found in {input_file}")
 
             for row in reader:
+                # Check if we've reached the maximum number of items
+                if max_items is not None and num_comparisons >= max_items:
+                    logger.debug(f"Reached max_items limit of {max_items}, stopping processing")
+                    break
+                
                 original = row[original_column]
                 corrected = row[corrected_column]
                 
@@ -1134,15 +1144,18 @@ class ErrorRate(BaseStatistic):
                 # Calculate maximum possible score (perfect match)
                 max_score = len(original) * match_score
                 
-                # Calculate actual alignment score
-                actual_score = NearestUMIFinder._calculate_alignment_score(
-                    original,
-                    corrected,
-                    mismatch_penalty,
-                    gap_penalty,
-                    match_score,
-                    None  # No cutoff
-                )
+                if original == corrected:
+                    # Perfect match - actual score equals max score
+                    actual_score = max_score
+                else:
+                    actual_score = NearestUMIFinder._calculate_alignment_score(
+                        original,
+                        corrected,
+                        mismatch_penalty,
+                        gap_penalty,
+                        match_score,
+                        None  # No cutoff
+                    )
                 
                 total_max_score += max_score
                 total_actual_score += actual_score
