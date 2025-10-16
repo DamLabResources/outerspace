@@ -10,3 +10,4 @@ from .count import CountCommand
 from .visualize import VisualizeCommand
 from .merge import MergeCommand
 from .pipeline import PipelineCommand
+from .subsample import SubsampleCommand
