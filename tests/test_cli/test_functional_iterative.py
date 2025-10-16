@@ -507,6 +507,89 @@ def test_workflow_with_config(temp_workspace):
     cli = Cli(stats_args)
     cli.run()
 
+
+def test_stats_with_threading(temp_workspace):
+    """Test stats command with multi-threading enabled"""
+    # First, run the full workflow to generate data
+    pairs = [
+        (
+            "reads/409-4_S1_L002_R1_001.fastq.gz",
+            "reads/409-4_S1_L002_R2_001.fastq.gz",
+            "shuffle",
+        ),
+        (
+            "reads/2-G1L9-M1_S9_L001_R1_001.fastq.gz",
+            "reads/2-G1L9-M1_S9_L001_R2_001.fastq.gz",
+            "M1-lib",
+        ),
+        (
+            "reads/2-G1L9-M2_S12_L001_R1_001.fastq.gz",
+            "reads/2-G1L9-M2_S12_L001_R2_001.fastq.gz",
+            "M2-lib",
+        ),
+    ]
+
+    # Run findseq and collapse for all samples
+    for read1, read2, output_name in pairs:
+        findseq_args = [
+            "findseq",
+            "-c", os.path.join(temp_workspace, "grnaquery.toml"),
+            "-1",
+            os.path.join(temp_workspace, read1),
+            "-2",
+            os.path.join(temp_workspace, read2),
+            "-o",
+            os.path.join(temp_workspace, f"findseq/{output_name}.csv"),
+        ]
+        cli = Cli(findseq_args)
+        cli.run()
+
+    collapse_args = [
+        "collapse",
+        "--input-dir",
+        os.path.join(temp_workspace, "findseq"),
+        "--output-dir",
+        os.path.join(temp_workspace, "collapse"),
+        "--columns",
+        "UMI_5prime,UMI_3prime",
+        "--mismatches",
+        "2",
+        "--method",
+        "directional",
+    ]
+    cli = Cli(collapse_args)
+    cli.run()
+
+    # Test stats with single thread (baseline)
+    stats_args_single = [
+        "stats",
+        os.path.join(temp_workspace, "collapse/shuffle.csv"),
+        os.path.join(temp_workspace, "collapse/M1-lib.csv"),
+        os.path.join(temp_workspace, "collapse/M2-lib.csv"),
+        "--config",
+        os.path.join(temp_workspace, "grnaquery.toml"),
+        "--threads",
+        "1",
+    ]
+    cli = Cli(stats_args_single)
+    cli.run()
+
+    # Test stats with multiple threads
+    stats_args_multi = [
+        "stats",
+        os.path.join(temp_workspace, "collapse/shuffle.csv"),
+        os.path.join(temp_workspace, "collapse/M1-lib.csv"),
+        os.path.join(temp_workspace, "collapse/M2-lib.csv"),
+        "--config",
+        os.path.join(temp_workspace, "grnaquery.toml"),
+        "--threads",
+        "3",
+    ]
+    cli = Cli(stats_args_multi)
+    cli.run()
+    # If we get here without errors, threading works
+    # (Results should be the same, just calculated in parallel)
+
     
 # New: key-rescue functional test using iterative collapse
 def test_collapse_key_rescue_synthetic(temp_workspace):
