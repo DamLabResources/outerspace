@@ -122,6 +122,7 @@ name = "protospacer_efficiency_rate"
 
 # Error rate using alignment scoring
 # Compares original vs corrected sequences using alignment scores
+# Note: Can use comma-separated column lists (e.g., "UMI_5prime,UMI_3prime") to concatenate multiple columns
 [[stats.metrics]]
 method = "error_rate"
 original_column = "protospacer"
@@ -129,7 +130,15 @@ corrected_column = "protospacer_corrected"
 mismatch_penalty = -1  # Optional: penalty for mismatches (default: -1)
 gap_penalty = -3       # Optional: penalty for gaps (default: -3)
 match_score = 1        # Optional: score for matches (default: 1)
+max_items = 10000      # Optional: process only first N items for performance (default: None, process all)
 name = "protospacer_error_rate"
+
+# Example: Multi-column error rate (concatenates UMI parts before comparison)
+# [[stats.metrics]]
+# method = "error_rate"
+# original_column = "UMI_5prime,UMI_3prime"
+# corrected_column = "UMI_5prime_corrected,UMI_3prime_corrected"
+# name = "umi_combined_error_rate"
 
 [owner]
 name = "SCB, DK, WND, RB"

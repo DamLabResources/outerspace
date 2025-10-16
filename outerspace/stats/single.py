@@ -1084,11 +1084,14 @@ class ErrorRate(BaseStatistic):
             CSV separator
         **step_params : Any
             Should include:
-            - original_column: str - Column with original values (required)
-            - corrected_column: str - Column with corrected values (required)
+            - original_column: str - Column(s) with original values (required)
+                Can be a single column name or comma-separated list (e.g., "col1,col2")
+            - corrected_column: str - Column(s) with corrected values (required)
+                Can be a single column name or comma-separated list (e.g., "col1,col2")
             - mismatch_penalty: int - Penalty for mismatches (default: -1)
             - gap_penalty: int - Penalty for gaps (default: -3)
             - match_score: int - Score for matches (default: 1)
+            - max_items: int - Maximum number of items to process (default: None, process all)
 
         Returns
         -------
@@ -1102,15 +1105,27 @@ class ErrorRate(BaseStatistic):
         
         This uses the alignment scoring system from NearestUMIFinder, which accounts
         for mismatches and gaps more accurately than simple Hamming distance.
+        
+        When max_items is specified, only the first max_items rows will be processed,
+        which can significantly improve performance for large datasets.
+        
+        When multiple columns are specified (comma-separated), their values are
+        concatenated together before comparison. This is useful for multi-part
+        sequences like dual UMIs.
         """
-        original_column = step_params.get("original_column")
-        corrected_column = step_params.get("corrected_column")
+        original_column_spec = step_params.get("original_column")
+        corrected_column_spec = step_params.get("corrected_column")
         mismatch_penalty = step_params.get("mismatch_penalty", -1)
         gap_penalty = step_params.get("gap_penalty", -3)
         match_score = step_params.get("match_score", 1)
+        max_items = step_params.get("max_items")
 
-        if not original_column or not corrected_column:
+        if not original_column_spec or not corrected_column_spec:
             raise ValueError("Both original_column and corrected_column are required for ErrorRate")
+
+        # Parse column specifications (can be comma-separated lists)
+        original_columns = [col.strip() for col in original_column_spec.split(",")]
+        corrected_columns = [col.strip() for col in corrected_column_spec.split(",")]
 
         total_max_score = 0
         total_actual_score = 0
@@ -1119,14 +1134,23 @@ class ErrorRate(BaseStatistic):
         with open(input_file, "r") as f:
             reader = csv.DictReader(f, delimiter=sep)
             
-            if original_column not in reader.fieldnames:
-                raise ValueError(f"Column '{original_column}' not found in {input_file}")
-            if corrected_column not in reader.fieldnames:
-                raise ValueError(f"Column '{corrected_column}' not found in {input_file}")
+            # Validate all columns exist
+            for col in original_columns:
+                if col not in reader.fieldnames:
+                    raise ValueError(f"Column '{col}' not found in {input_file}")
+            for col in corrected_columns:
+                if col not in reader.fieldnames:
+                    raise ValueError(f"Column '{col}' not found in {input_file}")
 
             for row in reader:
-                original = row[original_column]
-                corrected = row[corrected_column]
+                # Check if we've reached the maximum number of items
+                if max_items is not None and num_comparisons >= max_items:
+                    logger.debug(f"Reached max_items limit of {max_items}, stopping processing")
+                    break
+                
+                # Concatenate values from multiple columns
+                original = "".join(row[col] for col in original_columns)
+                corrected = "".join(row[col] for col in corrected_columns)
                 
                 if not original or not corrected:
                     continue
@@ -1134,15 +1158,18 @@ class ErrorRate(BaseStatistic):
                 # Calculate maximum possible score (perfect match)
                 max_score = len(original) * match_score
                 
-                # Calculate actual alignment score
-                actual_score = NearestUMIFinder._calculate_alignment_score(
-                    original,
-                    corrected,
-                    mismatch_penalty,
-                    gap_penalty,
-                    match_score,
-                    None  # No cutoff
-                )
+                if original == corrected:
+                    # Perfect match - actual score equals max score
+                    actual_score = max_score
+                else:
+                    actual_score = NearestUMIFinder._calculate_alignment_score(
+                        original,
+                        corrected,
+                        mismatch_penalty,
+                        gap_penalty,
+                        match_score,
+                        None  # No cutoff
+                    )
                 
                 total_max_score += max_score
                 total_actual_score += actual_score
