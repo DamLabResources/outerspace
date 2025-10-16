@@ -97,14 +97,6 @@ def test_hill_end_to_end(equal_umi):
     assert result > 0
 
 
-def test_hill_with_allowed_list(partial_umi):
-    """Test Hill number calculation with allowed list"""
-    allowed_list = ["AAAAAA", "TTTTTT", "CCCCCC"]
-    result = HillNumber.calculate(partial_umi, q=1, allowed_list=allowed_list)
-    assert result is not None
-    assert result > 0
-
-
 def test_hill_different_q_values():
     """Test that Hill numbers are ordered: q=0 >= q=1 >= q=2"""
     counts = {

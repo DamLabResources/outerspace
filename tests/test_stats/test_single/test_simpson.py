@@ -57,13 +57,5 @@ def test_simpson_end_to_end(equal_umi):
     assert result is not None
     assert 0 < result < 1
 
-
-def test_simpson_with_allowed_list(partial_umi):
-    """Test Simpson diversity calculation with allowed list"""
-    allowed_list = ["AAAAAA", "TTTTTT", "CCCCCC", "GGGGGG", "ATATAT"]
-    result = SimpsonDiversity.calculate(partial_umi, allowed_list=allowed_list)
-    assert result is not None
-    assert 0 < result < 1
-
     
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.

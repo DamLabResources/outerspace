@@ -129,14 +129,13 @@ class UMIStats(BaseStatistic):
     """Base class for UMI statistics calculations.
 
     This class provides common functionality for UMI statistics calculations
-    including count access and allowed list handling.
+    including count access.
     """
 
     def __init__(
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize UMI stats calculator.
@@ -147,29 +146,11 @@ class UMIStats(BaseStatistic):
             UMI object to calculate statistics on
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
         **kwargs : Any
             Additional arguments passed to parent class
         """
         super().__init__(umi, **kwargs)
         self.use_corrected = use_corrected
-        self.allowed_list = allowed_list
-
-
-    # TODO: Remove allowed_list logic across all stats classes, it is handled elsewhere
-    @property
-    def _allowed_list(self) -> Optional[List[bytes]]:
-        """Get allowed list in bytes format.
-
-        Returns
-        -------
-        Optional[List[bytes]]
-            Allowed list converted to bytes, or None if not provided
-        """
-        if self.allowed_list:
-            return [umi.encode("ascii") for umi in self.allowed_list]
-        return None
 
     @property
     def _counts(self) -> Dict[bytes, int]:
@@ -197,7 +178,6 @@ class GiniCoefficient(UMIStats):
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Gini coefficient calculator.
 
@@ -207,11 +187,8 @@ class GiniCoefficient(UMIStats):
             UMI object to calculate statistics on
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed keys. If provided, missing keys will be
-            treated as having zero counts in the calculation.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
 
     @staticmethod
     def calculate_gini(counts: Sequence[float]) -> Optional[float]:
@@ -261,14 +238,7 @@ class GiniCoefficient(UMIStats):
         Optional[float]
             Gini coefficient or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=True
-            )
-        else:
-            counts = self._counts
-
-        result = GiniCoefficient.calculate_gini(list(counts.values()))
+        result = GiniCoefficient.calculate_gini(list(self._counts.values()))
         logger.debug(f"Calculated Gini coefficient: {result}")
         return result
 
@@ -286,7 +256,6 @@ class GiniCoefficient(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
         Returns
@@ -296,16 +265,10 @@ class GiniCoefficient(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)  # No correction needed, data is pre-collapsed
 
         if not key_column:
             raise ValueError("key_column is required for GiniCoefficient")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -320,7 +283,7 @@ class GiniCoefficient(UMIStats):
         umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
         umi._corrected_counts = umi._counts.copy()
 
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+        return cls.calculate(umi, use_corrected=use_corrected)
 
 
 class ShannonDiversity(UMIStats):
@@ -335,7 +298,6 @@ class ShannonDiversity(UMIStats):
         umi: UMI,
         use_corrected: bool = True,
         base: float = 2.0,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Shannon diversity calculator.
 
@@ -347,10 +309,8 @@ class ShannonDiversity(UMIStats):
             If True, use corrected counts. If False, use original counts.
         base : float, default=2.0
             Base of the logarithm (default: 2.0 for bits)
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
         self.base = base
 
     @staticmethod
@@ -403,14 +363,7 @@ class ShannonDiversity(UMIStats):
         Optional[float]
             Shannon diversity index or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        result = ShannonDiversity.calculate_shannon(list(counts.values()), self.base)
+        result = ShannonDiversity.calculate_shannon(list(self._counts.values()), self.base)
         logger.debug(f"Calculated Shannon diversity (base {self.base}): {result}")
         return result
 
@@ -428,7 +381,6 @@ class ShannonDiversity(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
             - base: float (optional) - Base for logarithm (default 2.0)
 
@@ -439,17 +391,11 @@ class ShannonDiversity(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)
         base = step_params.get("base", 2.0)
 
         if not key_column:
             raise ValueError("key_column is required for ShannonDiversity")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -463,7 +409,7 @@ class ShannonDiversity(UMIStats):
         umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
         umi._corrected_counts = umi._counts.copy()
 
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list, base=base)
+        return cls.calculate(umi, use_corrected=use_corrected, base=base)
 
 
 class SimpsonDiversity(UMIStats):
@@ -477,7 +423,6 @@ class SimpsonDiversity(UMIStats):
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Simpson's diversity calculator.
 
@@ -487,11 +432,8 @@ class SimpsonDiversity(UMIStats):
             UMI object to calculate statistics on
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed keys. If provided, missing keys will be
-            treated as having zero counts in the calculation.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
 
     @staticmethod
     def calculate_simpson(counts: Sequence[float]) -> Optional[float]:
@@ -539,14 +481,7 @@ class SimpsonDiversity(UMIStats):
         Optional[float]
             Simpson's diversity index or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        result = SimpsonDiversity.calculate_simpson(list(counts.values()))
+        result = SimpsonDiversity.calculate_simpson(list(self._counts.values()))
         logger.debug(f"Calculated Simpson diversity: {result}")
         return result
 
@@ -564,7 +499,6 @@ class SimpsonDiversity(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
         Returns
@@ -574,16 +508,10 @@ class SimpsonDiversity(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)
 
         if not key_column:
             raise ValueError("key_column is required for SimpsonDiversity")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -597,7 +525,7 @@ class SimpsonDiversity(UMIStats):
         umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
         umi._corrected_counts = umi._counts.copy()
 
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+        return cls.calculate(umi, use_corrected=use_corrected)
 
 
 def _parse_q_parameter(q_param: Any) -> List[float]:
@@ -670,7 +598,6 @@ class HillNumber(UMIStats):
         umi: UMI,
         q: float = 1.0,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Hill number calculator.
 
@@ -686,10 +613,8 @@ class HillNumber(UMIStats):
             - q→∞: Inverse of max proportional abundance
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
         self.q = q
 
     @staticmethod
@@ -771,14 +696,7 @@ class HillNumber(UMIStats):
         Optional[float]
             Hill number or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        result = HillNumber.calculate_hill(list(counts.values()), self.q)
+        result = HillNumber.calculate_hill(list(self._counts.values()), self.q)
         logger.debug(f"Calculated Hill number (q={self.q}): {result}")
         return result
 
@@ -796,7 +714,6 @@ class HillNumber(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
             - q: float, str, or comma-separated str - Order parameter(s) (required)
               Can be:
@@ -812,7 +729,6 @@ class HillNumber(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)
         q_param = step_params.get("q")
 
@@ -823,11 +739,6 @@ class HillNumber(UMIStats):
 
         # Parse q parameter
         q_values = _parse_q_parameter(q_param)
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -843,12 +754,12 @@ class HillNumber(UMIStats):
 
         # If single q value, return single result
         if len(q_values) == 1:
-            return cls.calculate(umi, q=q_values[0], use_corrected=use_corrected, allowed_list=allowed_list)
+            return cls.calculate(umi, q=q_values[0], use_corrected=use_corrected)
         
         # If multiple q values, return dict
         results = {}
         for q in q_values:
-            result = cls.calculate(umi, q=q, use_corrected=use_corrected, allowed_list=allowed_list)
+            result = cls.calculate(umi, q=q, use_corrected=use_corrected)
             results[f"q={q}"] = result
         
         return results

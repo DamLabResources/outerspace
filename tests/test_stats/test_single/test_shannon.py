@@ -66,13 +66,5 @@ def test_shannon_end_to_end(equal_umi):
     assert result is not None
     assert result > 0
 
-
-def test_shannon_with_allowed_list(partial_umi):
-    """Test Shannon diversity calculation with allowed list"""
-    allowed_list = ["AAAAAA", "TTTTTT", "CCCCCC", "GGGGGG", "ATATAT"]
-    result = ShannonDiversity.calculate(partial_umi, allowed_list=allowed_list)
-    assert result is not None
-    assert result > 0
-
     
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
