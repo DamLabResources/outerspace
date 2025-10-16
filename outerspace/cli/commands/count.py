@@ -250,19 +250,14 @@ class CountCommand(BaseCommand):
         )
 
         # Calculate Gini coefficients using the stats module
+        # Note: allowed_list filtering is now handled upstream during collapse
         barcode_gini = GiniCoefficient.calculate(umi)
-        key_gini = GiniCoefficient.calculate(
-            key_umi,
-            allowed_list=list(allowed_keys_ordered) if allowed_keys_ordered else None,
-        )
+        key_gini = GiniCoefficient.calculate(key_umi)
         logger.info(f"Barcode Gini coefficient: {barcode_gini:.3f}")
         logger.info(f"Key Gini coefficient: {key_gini:.3f}")
 
         barcode_simpson = SimpsonDiversity.calculate(umi)
-        key_simpson = SimpsonDiversity.calculate(
-            key_umi,
-            allowed_list=list(allowed_keys_ordered) if allowed_keys_ordered else None,
-        )
+        key_simpson = SimpsonDiversity.calculate(key_umi)
         logger.info(f"Barcode Simpson diversity: {barcode_simpson:.3f}")
         logger.info(f"Key Simpson diversity: {key_simpson:.3f}")
 
