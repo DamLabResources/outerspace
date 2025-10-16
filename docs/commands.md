@@ -269,6 +269,71 @@ Common Arguments:
                         Log level (default: WARNING)
 ```
 
+### `outerspace subsample`
+Estimates metric stability through random subsampling at various sample sizes. Features:
+- Random row-based subsampling with configurable sample sizes
+- Multiple replicates per sample size for robust estimates
+- Reproducible results via RNG seeding
+- Reuses metric configurations from `[[stats.metrics]]` or `[[subsample.metrics]]`
+- Long-format output for easy visualization and downstream analysis
+- Useful for determining minimum sequencing depth and assessing metric robustness
+
+```bash
+usage: outerspace subsample [-h] [--sep SEP] [--sample-sizes SAMPLE_SIZES]
+                            [--n-replicates N_REPLICATES] [--seed SEED]
+                            [-o OUTPUT_FILE] [--threads THREADS]
+                            [--config CONFIG] [--progress-bar]
+                            [--log-file LOG_FILE] [--log-level LOG_LEVEL]
+                            input_file
+
+Estimate metric stability through random subsampling
+
+positional arguments:
+  input_file            Input CSV file to subsample (collapse output)
+
+options:
+  -h, --help            show this help message and exit
+  --sep SEP             CSV separator (default: ,)
+  --sample-sizes SAMPLE_SIZES
+                        Comma-separated sample size percentages (e.g., '0.1,1,10,50')
+  --n-replicates N_REPLICATES
+                        Number of replicates per sample size
+  --seed SEED           Random seed for reproducibility (default: 42)
+  -o OUTPUT_FILE, --output-file OUTPUT_FILE
+                        Output CSV file (default: stdout)
+  --threads THREADS     Number of threads for parallel processing (default: 1)
+
+Common Arguments:
+  --config CONFIG, -c CONFIG
+                        Configuration file
+  --progress-bar, -p    Enable progress bar
+  --log-file LOG_FILE   Log file
+  --log-level LOG_LEVEL
+                        Log level (default: WARNING)
+```
+
+**Output Format**: Long-format CSV with columns:
+- `sample_size_pct`: Sample size as percentage of total
+- `sample_size_n`: Absolute number of rows sampled
+- `replicate`: Replicate number (0-indexed)
+- `metric_name`: Name of the metric
+- `metric_value`: Calculated metric value
+
+**Configuration**: Metrics are defined using `[[subsample.metrics]]` or `[[stats.metrics]]` sections in the config file. Each metric requires `method`, `name`, and method-specific parameters (e.g., `key_column`, `barcode_column`).
+
+**Example**:
+```bash
+# Estimate diversity metric stability at different sample sizes
+outerspace subsample -c config.toml \
+  --sample-sizes "0.1,1,5,10,25,50,100" \
+  --n-replicates 10 \
+  --seed 42 \
+  -o subsample_results.csv \
+  collapse_output.csv
+```
+
+This generates a long-format table that can be easily visualized to show how metrics stabilize with increasing sample size, helping determine optimal sequencing depth.
+
 ### `outerspace pipeline`
 Runs complete OUTERSPACE workflows using Snakemake. Features:
 - Integrated workflow execution

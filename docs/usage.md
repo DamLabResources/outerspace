@@ -32,7 +32,9 @@ The proposed OUTERSPACE workflow helps process and analyze this data through sev
 
 4. **Statistical Analysis** (`stats`): Calculates comprehensive statistics including Gini coefficients, Shannon diversity, and other metrics to analyze barcode distributions. This is useful for diagnostic purposes and diversity assessment.
 
-5. **Visualization** (`visualize`): Creates plots to help interpret the results.
+5. **Subsampling Analysis** (`subsample`): Estimates metric stability across different sample sizes through random subsampling. This helps determine optimal sequencing depth and assess the robustness of calculated metrics.
+
+6. **Visualization** (`visualize`): Creates plots to help interpret the results.
 
 This integrated toolset helps researchers accurately measure changes in gRNA abundance between conditions, identify hits from their screens, and ensure data quality through multiple analysis steps.
 
@@ -62,7 +64,15 @@ outerspace count -c config.toml \
   --key-mismatch-penalty -1 --key-gap-penalty -3
 
 # Calculate statistics (uses config settings - requires [[stats.metrics]] sections)
-outerspace stats -c config.toml ctrl_counts.csv exp_counts.csv
+outerspace stats -c config.toml ctrl_counts.csv exp_counts.csv -o statistics.csv
+
+# Assess metric stability with subsampling (optional quality control step)
+outerspace subsample -c config.toml \
+  --sample-sizes "1,5,10,25,50,100" \
+  --n-replicates 10 \
+  --seed 42 \
+  -o subsample_stability.csv \
+  ctrl_output_collapsed.csv
 
 # Visualize results
 outerspace visualize -c config.toml output_plots ctrl_counts exp_counts
@@ -134,7 +144,30 @@ outerspace collapse -c config.toml --input-file viral_barcodes.csv --output-file
 outerspace count -c config.toml --input-file corrected_barcodes.csv --output-file barcode_counts.csv
 
 # Analyze distribution (uses config settings - requires [[stats.metrics]] sections)
-outerspace stats -c config.toml barcode_counts.csv
+outerspace stats -c config.toml barcode_counts.csv -o barcode_statistics.csv
+
+# Optional: Assess how diversity metrics change with sampling depth
+# This helps determine if sequencing depth is sufficient for robust diversity estimates
+outerspace subsample -c config.toml \
+  --sample-sizes "0.1,0.5,1,5,10,25,50,100" \
+  --n-replicates 20 \
+  -o diversity_stability.csv \
+  corrected_barcodes.csv
 ```
+
+### Understanding Metric Stability
+
+The `subsample` command is particularly useful for viral barcode studies where:
+- **Bottleneck detection** requires robust diversity estimates that are stable across sampling
+- **Reservoir characterization** depends on accurate measurement of clonal expansion
+- **Sequencing depth optimization** ensures cost-effective study design
+
+By analyzing how diversity metrics (Shannon, Simpson, Gini) change with sample size, you can:
+1. Determine the minimum sequencing depth needed for reliable estimates
+2. Assess whether observed diversity patterns are robust or artifacts of sampling
+3. Compare diversity stability between different anatomical sites or time points
+4. Make informed decisions about sequencing depth for future experiments
+
+The long-format output from `subsample` can be easily visualized using tools like R/ggplot2 or Python/matplotlib to create rarefaction-style curves showing metric convergence.
 
 Copyright (C) 2025, SCB, DVK PhD, RB, WND PhD. All rights reserved.
