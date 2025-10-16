@@ -664,4 +664,97 @@ def test_collapse_key_rescue_synthetic(temp_workspace):
                 # Check that corrected column has key1
                 assert "key1" in line
 
+
+def test_subsample_workflow(temp_workspace):
+    """Test subsample command workflow"""
+    import csv
+    
+    # Step 1: Create a collapse file with sufficient data
+    collapse_file = os.path.join(temp_workspace, "collapse_for_subsample.csv")
+    with open(collapse_file, "w") as f:
+        f.write("protospacer,UMI,count\n")
+        for i in range(100):
+            f.write(f"PROTO{i:03d},UMI{i:03d},{i+1}\n")
+
+    # Step 2: Create config file with metrics
+    config_file = os.path.join(temp_workspace, "subsample_config.toml")
+    with open(config_file, "w") as f:
+        f.write(
+            """[[stats.metrics]]
+method = "gini_coefficient"
+key_column = "protospacer"
+barcode_column = "UMI"
+name = "gini"
+
+[[stats.metrics]]
+method = "shannon_diversity"
+key_column = "protospacer"
+barcode_column = "UMI"
+name = "shannon"
+"""
+        )
+
+    # Step 3: Run subsample command
+    output_file = os.path.join(temp_workspace, "subsample_output.csv")
+    args = [
+        "subsample",
+        "--config",
+        config_file,
+        "--sample-sizes",
+        "10,50",
+        "--n-replicates",
+        "3",
+        "--seed",
+        "42",
+        "-o",
+        output_file,
+        collapse_file,
+    ]
+    cli = Cli(args)
+    cli.run()
+
+    # Step 4: Verify output
+    assert os.path.exists(output_file)
+
+    with open(output_file, "r") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+        # Should have 2 sizes × 3 replicates × 2 metrics = 12 rows
+        assert len(rows) == 12
+
+        # Verify columns
+        assert reader.fieldnames == [
+            "sample_size_pct",
+            "sample_size_n",
+            "replicate",
+            "metric_name",
+            "metric_value",
+        ]
+
+        # Verify sample sizes
+        sample_sizes_pct = {float(row["sample_size_pct"]) for row in rows}
+        assert sample_sizes_pct == {10.0, 50.0}
+
+        # Verify metrics
+        metric_names = {row["metric_name"] for row in rows}
+        assert metric_names == {"gini", "shannon"}
+
+        # Verify replicates
+        for size_pct in [10.0, 50.0]:
+            for metric_name in ["gini", "shannon"]:
+                size_metric_rows = [
+                    r for r in rows
+                    if float(r["sample_size_pct"]) == size_pct
+                    and r["metric_name"] == metric_name
+                ]
+                replicates = {int(r["replicate"]) for r in size_metric_rows}
+                assert replicates == {0, 1, 2}
+
+        # Verify all metric values are numeric
+        for row in rows:
+            assert row["metric_value"] is not None
+            float(row["metric_value"])  # Should not raise
+
+
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
