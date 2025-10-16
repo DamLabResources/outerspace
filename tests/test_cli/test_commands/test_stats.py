@@ -58,10 +58,10 @@ barcode_column = "count"
 name = "gini"
 
 [[stats.metrics]]
-method = "umi_redundancy"
+method = "shannon_diversity"
 key_column = "key"
 barcode_column = "count"
-name = "redundancy"
+name = "shannon"
 """
             )
 
@@ -135,7 +135,7 @@ name = "gini"
             )
 
         args = ["stats", "--config", config_file, "nonexistent.csv"]
-        with pytest.raises(ValueError, match="No files were successfully processed"):
+        with pytest.raises(ValueError, match="No input files found"):
             cli = Cli(args)
             cli.run()
 
