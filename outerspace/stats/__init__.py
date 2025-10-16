@@ -12,7 +12,6 @@ from .single import (
     SimpsonDiversity,
     UMIRecoveryRate,
     UMIEfficiencyRate,
-    UMIErrorRate,
     ErrorRate,
 )
 
@@ -39,7 +38,6 @@ __all__ = [
     "SimpsonDiversity",
     "UMIRecoveryRate",
     "UMIEfficiencyRate",
-    "UMIErrorRate",
     "ErrorRate",
     "JaccardSimilarity",
     "BrayCurtisDissimilarity",

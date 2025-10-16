@@ -21,7 +21,6 @@ from outerspace.stats import (
     SimpsonDiversity,
     UMIRecoveryRate,
     UMIEfficiencyRate,
-    UMIErrorRate,
     ErrorRate,
 )
 
@@ -38,7 +37,6 @@ STAT_REGISTRY: Dict[str, Type[BaseStatistic]] = {
     "simpson_diversity": SimpsonDiversity,
     "umi_recovery_rate": UMIRecoveryRate,
     "umi_efficiency_rate": UMIEfficiencyRate,
-    "umi_error_rate": UMIErrorRate,
     "error_rate": ErrorRate,
 }
 
