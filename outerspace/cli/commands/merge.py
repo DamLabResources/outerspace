@@ -1,14 +1,12 @@
 """Merge command for combining multiple UMI count files.
 
 This module provides the MergeCommand class for merging multiple UMI count files
-into a single file. It supports various output formats and optional UMI clustering
-with comprehensive metrics reporting.
+into a single file. It supports various output formats.
 """
 
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict
 from argparse import ArgumentParser
 
 from outerspace.cli.commands.base import BaseCommand
@@ -26,8 +24,7 @@ class MergeCommand(BaseCommand):
     """Command for merging multiple UMI count files.
 
     This command combines multiple CSV files containing UMI counts into a single
-    output file. It supports both wide and long output formats and optional
-    UMI clustering with various methods.
+    output file. It supports both wide and long output formats.
     """
 
     def _init_parser(self, subparser: ArgumentParser) -> None:
@@ -62,45 +59,14 @@ class MergeCommand(BaseCommand):
             default="wide",
             help="Output format: wide (samples as columns) or long (sample,umi,count columns)",
         )
-        # Add collapse-related arguments
-        parser.add_argument(
-            "--mismatches",
-            type=int,
-            default=0,
-            help="Number of mismatches allowed for clustering (default: 0)",
-        )
-        parser.add_argument(
-            "--method",
-            choices=["cluster", "adjacency", "directional"],
-            default="directional",
-            help="Clustering method to use (default: directional)",
-        )
-        parser.add_argument("--metrics", help="Output YAML file for metrics")
         self._add_common_args(parser)
-
-    def _write_metrics(self, metrics: Dict[str, Any], filepath: str) -> None:
-        """Write metrics to YAML file.
-
-        Parameters
-        ----------
-        metrics : Dict[str, Any]
-            Dictionary of metrics to write
-        filepath : str
-            Path to output YAML file
-        """
-        import yaml
-
-        logger.info(f"Writing metrics to {filepath}")
-
-        with open(filepath, "w") as f:
-            yaml.dump(metrics, f, default_flow_style=False)
 
     def run(self) -> None:
         """Run the merge command.
 
         This method orchestrates the file merging process, handling configuration
-        loading, UMI collection creation, optional clustering, and output generation
-        with comprehensive error handling and metrics reporting.
+        loading, UMI collection creation, and output generation with comprehensive
+        error handling.
 
         Raises
         ------
@@ -120,8 +86,6 @@ class MergeCommand(BaseCommand):
             "sep": ",",
             "sample_names": None,
             "format": "wide",
-            "mismatches": 2,
-            "method": "none",
         }
         self._merge_config_and_args(defaults)
 
@@ -152,51 +116,13 @@ class MergeCommand(BaseCommand):
                 count_column=self.args.count_column,
             )
 
-            # Collapse UMIs if mismatches > 0
-            if self.args.mismatches > 0:
-                logger.info(
-                    f"Collapsing UMIs with {self.args.mismatches} mismatches "
-                    f"using {self.args.method} method"
-                )
-                collection = collection.collapse_umis(
-                    mismatches=self.args.mismatches, method=self.args.method
-                )
-
-                # Generate metrics if requested
-                if self.args.metrics:
-                    logger.info("Generating clustering metrics")
-                    metrics = {
-                        "barcode_counts": {
-                            "unique_barcodes_before": sum(
-                                len(umi._counts) for umi in collection.umis.values()
-                            ),
-                            "unique_barcodes_after": sum(
-                                len(umi.corrected_counts)
-                                for umi in collection.umis.values()
-                            ),
-                            "total_reads": sum(
-                                sum(umi._counts.values())
-                                for umi in collection.umis.values()
-                            ),
-                        },
-                        "correction_details": {
-                            "clusters_formed": sum(
-                                len(set(umi._mapping.values()))
-                                for umi in collection.umis.values()
-                            ),
-                            "barcodes_corrected": sum(
-                                len(umi._mapping) - len(umi.corrected_counts)
-                                for umi in collection.umis.values()
-                            ),
-                        },
-                    }
-                    self._write_metrics(metrics, self.args.metrics)
-                    logger.info(f"Metrics written to: {self.args.metrics}")
-
             # Write merged data to output file
             logger.info(f"Writing merged data to {self.args.output_file}")
             collection.write(
-                self.args.output_file, sep=self.args.sep, format=self.args.format
+                self.args.output_file, 
+                sep=self.args.sep, 
+                format=self.args.format,
+                key_name=self.args.key_column
             )
 
             logger.info(
