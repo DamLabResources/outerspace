@@ -216,5 +216,69 @@ def test_merge_long_format():
         assert sample1_gcta == 5
         assert sample2_gcta == 12
 
+
+def test_merge_with_large_csv_fields():
+    """Test merge command handles CSV files with large fields (>131KB default limit)
+    
+    This test ensures we don't regress on the csv.field_size_limit fix.
+    Some CSV files may have columns with very long comma-separated lists
+    (e.g., unique_barcodes column with thousands of barcodes) that exceed
+    Python's default CSV field size limit of 131072 bytes.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test files with large fields
+        file1 = os.path.join(temp_dir, "test1.csv")
+        file2 = os.path.join(temp_dir, "test2.csv")
+        output_file = os.path.join(temp_dir, "merged.csv")
+
+        # Create a very large field - a comma-separated list of barcodes
+        # that exceeds the default CSV field size limit (131072 bytes)
+        # Each barcode is 16 chars + comma = 17 bytes, so ~8000 barcodes = ~136KB
+        num_barcodes = 8000
+        large_barcode_list = ",".join([f"BARCODE{i:010d}" for i in range(num_barcodes)])
+        
+        # Verify the field is large enough to trigger the issue
+        assert len(large_barcode_list) > 131072, "Field must exceed default CSV limit"
+
+        # Write test data with large fields in quotes (like real data)
+        with open(file1, "w") as f:
+            f.write("protospacer,barcodes,count\n")
+            f.write(f'ACTGACTGACTGACTGACTG,"{large_barcode_list}",100\n')
+            f.write('GCTAGCTAGCTAGCTAGCTA,"SMALLLIST",50\n')
+        
+        with open(file2, "w") as f:
+            f.write("protospacer,barcodes,count\n")
+            f.write(f'ACTGACTGACTGACTGACTG,"{large_barcode_list}",200\n')
+            f.write('GCTAGCTAGCTAGCTAGCTA,"ANOTHERSMALL",75\n')
+
+        # This should not raise "field larger than field limit" error
+        args = [
+            "merge",
+            file1,
+            file2,
+            "--output-file",
+            output_file,
+            "--key-column",
+            "protospacer",
+            "--count-column",
+            "count",
+            "--sample-names",
+            "sample1",
+            "sample2",
+        ]
+        cli = Cli(args)
+        cli.run()  # Should succeed without CSV field size limit error
+
+        # Verify output file exists and has correct data
+        assert os.path.exists(output_file)
+        
+        # Read output and verify contents
+        df = pd.read_csv(output_file, index_col="protospacer")
+        assert set(df.columns) == {"sample1", "sample2"}
+        assert df.loc["ACTGACTGACTGACTGACTG", "sample1"] == 100
+        assert df.loc["ACTGACTGACTGACTGACTG", "sample2"] == 200
+        assert df.loc["GCTAGCTAGCTAGCTAGCTA", "sample1"] == 50
+        assert df.loc["GCTAGCTAGCTAGCTAGCTA", "sample2"] == 75
+
         
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
