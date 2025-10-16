@@ -591,7 +591,7 @@ class UmiCollection:
         logger.info(f"Loaded UmiCollection from DataFrame with {len(umis)} samples")
         return cls(umis)
 
-    def to_df(self, format: str = "wide") -> "pd.DataFrame":
+    def to_df(self, format: str = "wide", key_name: str = "umi") -> "pd.DataFrame":
         """Convert UmiCollection to pandas DataFrame.
 
         Parameters
@@ -599,7 +599,9 @@ class UmiCollection:
         format : str, default='wide'
             Output format, either 'wide' or 'long'
             - wide: Each sample is a column, rows are UMIs
-            - long: Three columns: sample, umi, count
+            - long: Three columns: sample, key_name, count
+        key_name : str, default='umi'
+            Name to use for the key column (default: 'umi')
 
         Returns
         -------
@@ -620,19 +622,19 @@ class UmiCollection:
         for sample, umi in self.umis.items():
             for bc, count in umi.corrected_counts.items():
                 rows.append(
-                    {"sample": sample, "umi": bc.decode("ascii"), "count": count}
+                    {"sample": sample, key_name: bc.decode("ascii"), "count": count}
                 )
         long = pd.DataFrame(rows)
 
         if format == "wide":
             return pd.pivot_table(
-                long, values="count", index="umi", columns="sample", fill_value=0
+                long, values="count", index=key_name, columns="sample", fill_value=0
             )
 
         return long
 
     def write(
-        self, path: Union[str, Path], sep: str = ",", format: str = "wide"
+        self, path: Union[str, Path], sep: str = ",", format: str = "wide", key_name: str = "umi"
     ) -> None:
         """Write UmiCollection to CSV file.
 
@@ -644,9 +646,11 @@ class UmiCollection:
             CSV separator
         format : str, default='wide'
             Output format, either 'wide' or 'long'
+        key_name : str, default='umi'
+            Name to use for the key column (default: 'umi')
         """
         logger.info(f"Writing data to {path} in {format} format")
-        df = self.to_df(format=format)
+        df = self.to_df(format=format, key_name=key_name)
         df.to_csv(path, sep=sep, index=(format == "wide"))
         logger.info(f"Successfully wrote {len(df)} rows to {path}")
 
