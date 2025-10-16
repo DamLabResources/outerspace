@@ -10,6 +10,7 @@ from outerspace.stats import (
     GiniCoefficient,
     ShannonDiversity,
     SimpsonDiversity,
+    HillNumber,
     UMIRecoveryRate,
     UMIEfficiencyRate,
     ErrorRate,
@@ -138,6 +139,62 @@ def test_simpson_from_step(simple_csv_file):
     
     assert result is not None
     assert 0 <= result <= 1
+
+
+def test_hill_from_step_single_q(simple_csv_file):
+    """Test HillNumber._from_step with single q value"""
+    result = HillNumber._from_step(
+        simple_csv_file,
+        key_column="key",
+        barcode_column="count",
+        q=1
+    )
+    
+    assert result is not None
+    assert result > 0
+
+
+def test_hill_from_step_keyword(simple_csv_file):
+    """Test HillNumber._from_step with keyword q parameter"""
+    result = HillNumber._from_step(
+        simple_csv_file,
+        key_column="key",
+        barcode_column="count",
+        q="shannon"
+    )
+    
+    assert result is not None
+    assert result > 0
+
+
+def test_hill_from_step_multiple_q(simple_csv_file):
+    """Test HillNumber._from_step with multiple q values"""
+    result = HillNumber._from_step(
+        simple_csv_file,
+        key_column="key",
+        barcode_column="count",
+        q="richness, shannon, simpson, 1.5"
+    )
+    
+    assert isinstance(result, dict)
+    assert "q=0.0" in result
+    assert "q=1.0" in result
+    assert "q=2.0" in result
+    assert "q=1.5" in result
+    
+    # All values should be positive
+    for value in result.values():
+        assert value is not None
+        assert value > 0
+
+
+def test_hill_from_step_missing_q(simple_csv_file):
+    """Test that HillNumber requires q parameter"""
+    with pytest.raises(ValueError, match="q parameter is required"):
+        HillNumber._from_step(
+            simple_csv_file,
+            key_column="key"
+        )
 
 
 def test_recovery_rate_from_step(simple_csv_file, allowed_list_file):

@@ -599,7 +599,259 @@ class SimpsonDiversity(UMIStats):
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
-# TODO: Add a class to calculcate the Hill number
+
+def _parse_q_parameter(q_param: Any) -> List[float]:
+    """Parse q parameter into list of float values.
+    
+    Parameters
+    ----------
+    q_param : Any
+        Can be a number, a string word, or a comma-separated string
+        
+    Returns
+    -------
+    List[float]
+        List of q values to calculate
+        
+    Notes
+    -----
+    Supported string keywords:
+    - "richness": q=0
+    - "shannon": q=1
+    - "simpson": q=2
+    """
+    # Mapping of keywords to q values
+    keyword_map = {
+        "richness": 0.0,
+        "shannon": 1.0,
+        "simpson": 2.0,
+    }
+    
+    # If it's already a number, return it as a list
+    if isinstance(q_param, (int, float)):
+        return [float(q_param)]
+    
+    # If it's a string, parse it
+    if isinstance(q_param, str):
+        # Split by comma in case it's a list
+        parts = [p.strip() for p in q_param.split(",")]
+        q_values = []
+        
+        for part in parts:
+            # Try to convert to float first
+            try:
+                q_values.append(float(part))
+            except ValueError:
+                # If not a number, check if it's a keyword
+                part_lower = part.lower()
+                if part_lower in keyword_map:
+                    q_values.append(keyword_map[part_lower])
+                else:
+                    raise ValueError(
+                        f"Invalid q parameter '{part}'. "
+                        f"Must be a number or one of: {', '.join(keyword_map.keys())}"
+                    )
+        
+        return q_values
+    
+    raise ValueError(f"Invalid q parameter type: {type(q_param)}")
+
+
+class HillNumber(UMIStats):
+    """Calculate Hill numbers for diversity analysis.
+    
+    Hill numbers are a mathematically unified family of diversity indices
+    differing among themselves only by an exponent q that determines their
+    sensitivity to species relative abundances.
+    """
+
+    def __init__(
+        self,
+        umi: UMI,
+        q: float = 1.0,
+        use_corrected: bool = True,
+        allowed_list: Optional[List[str]] = None,
+    ) -> None:
+        """Initialize Hill number calculator.
+
+        Parameters
+        ----------
+        umi : UMI
+            UMI object to calculate statistics on
+        q : float, default=1.0
+            Order of the Hill number. Common values:
+            - q=0: Species richness (count of species)
+            - q=1: Exponential of Shannon entropy
+            - q=2: Inverse Simpson concentration
+            - q→∞: Inverse of max proportional abundance
+        use_corrected : bool, default=True
+            If True, use corrected counts. If False, use original counts.
+        allowed_list : Optional[List[str]], default=None
+            Optional list of allowed UMIs for filtering
+        """
+        super().__init__(umi, use_corrected, allowed_list)
+        self.q = q
+
+    @staticmethod
+    def calculate_hill(counts: Sequence[float], q: float) -> Optional[float]:
+        """Calculate Hill number for given q parameter.
+
+        Parameters
+        ----------
+        counts : Sequence[float]
+            Sequence of count values
+        q : float
+            Order of the Hill number
+
+        Returns
+        -------
+        Optional[float]
+            Hill number or None if calculation is not possible
+
+        Notes
+        -----
+        Hill numbers are a generalized diversity measure calculated as:
+        
+        For q ≠ 1:
+            D_q = (sum(p_i^q))^(1/(1-q))
+            
+        For q = 1 (limit as q→1):
+            D_1 = exp(-sum(p_i * ln(p_i))) = exp(H)
+            where H is Shannon entropy
+            
+        Special cases:
+        - q=0: Species richness (count of non-zero elements)
+        - q=1: Exponential of Shannon entropy
+        - q=2: Inverse Simpson concentration (1 / sum(p_i^2))
+        - q→∞: Inverse of max proportional abundance (1 / max(p_i))
+        
+        References
+        ----------
+        Hill, M. O. (1973). Diversity and evenness: a unifying notation and its
+        consequences. Ecology, 54(2), 427-432.
+        """
+        if not counts:
+            return None
+
+        # Filter out zero counts
+        counts_array = np.array([c for c in counts if c > 0])
+        
+        if len(counts_array) == 0:
+            return None
+            
+        total = np.sum(counts_array)
+        
+        if total == 0:
+            return None
+
+        # Calculate proportions
+        proportions = counts_array / total
+
+        # Special case: q = 0 (species richness)
+        if q == 0:
+            return float(len(counts_array))
+        
+        # Special case: q = 1 (exponential Shannon entropy)
+        # Use limit as q→1: exp(-sum(p_i * ln(p_i)))
+        elif abs(q - 1.0) < 1e-9:  # Close to 1
+            shannon = -np.sum(proportions * np.log(proportions))
+            return float(np.exp(shannon))
+        
+        # General case: q ≠ 1
+        else:
+            sum_p_q = np.sum(proportions ** q)
+            hill = sum_p_q ** (1 / (1 - q))
+            return float(hill)
+
+    def run(self) -> Optional[float]:
+        """Calculate Hill number for the UMI object.
+
+        Returns
+        -------
+        Optional[float]
+            Hill number or None if calculation is not possible
+        """
+        if self.allowed_list:
+            counts, _, _ = split_counts_by_allowed_list(
+                self._counts, self._allowed_list, add_missing=False
+            )
+        else:
+            counts = self._counts
+
+        result = HillNumber.calculate_hill(list(counts.values()), self.q)
+        logger.debug(f"Calculated Hill number (q={self.q}): {result}")
+        return result
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Any:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to collapse output CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - allowed_list: str (optional) - Path to allowed list file
+            - use_corrected: bool (optional) - Whether to use corrected counts
+            - q: float, str, or comma-separated str - Order parameter(s) (required)
+              Can be:
+              - A number: 0, 1, 2, 1.5, etc.
+              - A keyword: "richness" (0), "shannon" (1), "simpson" (2)
+              - Comma-separated: "richness, shannon, simpson, 1.5"
+
+        Returns
+        -------
+        float or Dict[str, float]
+            If single q value: returns float
+            If multiple q values: returns dict mapping q names to values
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        allowed_list_path = step_params.get("allowed_list")
+        use_corrected = step_params.get("use_corrected", False)
+        q_param = step_params.get("q")
+
+        if not key_column:
+            raise ValueError("key_column is required for HillNumber")
+        if q_param is None:
+            raise ValueError("q parameter is required for HillNumber")
+
+        # Parse q parameter
+        q_values = _parse_q_parameter(q_param)
+
+        # Load allowed list if provided
+        allowed_list = None
+        if allowed_list_path:
+            allowed_list = _read_allowed_list(allowed_list_path)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        # If single q value, return single result
+        if len(q_values) == 1:
+            return cls.calculate(umi, q=q_values[0], use_corrected=use_corrected, allowed_list=allowed_list)
+        
+        # If multiple q values, return dict
+        results = {}
+        for q in q_values:
+            result = cls.calculate(umi, q=q, use_corrected=use_corrected, allowed_list=allowed_list)
+            results[f"q={q}"] = result
+        
+        return results
 
 
 
