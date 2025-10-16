@@ -11,6 +11,7 @@ import logging
 import os
 import random
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -24,6 +25,9 @@ from outerspace.nearest import NearestUMIFinder
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Increase CSV field size limit to handle large fields
+csv.field_size_limit(sys.maxsize)
 
 __copyright__ = "Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved."
 __author__ = "WND"
