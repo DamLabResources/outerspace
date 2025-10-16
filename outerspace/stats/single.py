@@ -155,6 +155,8 @@ class UMIStats(BaseStatistic):
         self.use_corrected = use_corrected
         self.allowed_list = allowed_list
 
+
+    # TODO: Remove allowed_list logic across all stats classes, it is handled elsewhere
     @property
     def _allowed_list(self) -> Optional[List[bytes]]:
         """Get allowed list in bytes format.
@@ -596,6 +598,9 @@ class SimpsonDiversity(UMIStats):
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
+# TODO: Add a class to calculcate the Hill number
+
+
 
 class UMIRecoveryRate(UMIStats):
     """Calculate UMI recovery rate.
@@ -608,7 +613,7 @@ class UMIRecoveryRate(UMIStats):
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
+        allowed_list: Optional[List[str]] = None, # This allowed list should stay
     ) -> None:
         """Initialize UMI recovery rate calculator.
 
@@ -846,7 +851,7 @@ class UMIEfficiencyRate(UMIStats):
 
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
-
+# TODO: Redundant, remove this class
 class UMIErrorRate(BaseStatistic):
     """Calculate UMI error rate based on mismatches between original and corrected UMIs.
 
@@ -942,131 +947,7 @@ class UMIErrorRate(BaseStatistic):
         logger.debug(f"Calculated UMI error rate: {result}")
         return result
 
-
-class UMIRedundancy(UMIStats):
-    """Calculate UMI redundancy (average reads per unique UMI).
-
-    UMI redundancy measures the average number of reads per unique UMI,
-    indicating how much sequencing depth is available per unique sequence.
-    """
-
-    def __init__(
-        self,
-        umi: UMI,
-        use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
-    ) -> None:
-        """Initialize UMI redundancy calculator.
-
-        Parameters
-        ----------
-        umi : UMI
-            UMI object to calculate statistics on
-        use_corrected : bool, default=True
-            If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
-        """
-        super().__init__(umi, use_corrected, allowed_list)
-
-    @staticmethod
-    def calculate_redundancy(counts: Dict[bytes, int]) -> Optional[float]:
-        """Calculate UMI redundancy from total and unique counts.
-
-        Parameters
-        ----------
-        counts : Dict[bytes, int]
-            Dictionary of UMIs and their counts
-
-        Returns
-        -------
-        Optional[float]
-            UMI redundancy or None if calculation is not possible
-
-        Notes
-        -----
-        UMI redundancy is calculated as total_reads / unique_umis
-        """
-        total_reads = sum(counts.values())
-        unique_umis = len(counts)
-
-        if unique_umis == 0:
-            return None
-
-        return total_reads / unique_umis
-
-    def run(self) -> Optional[float]:
-        """Calculate UMI redundancy for the UMI object.
-
-        Returns
-        -------
-        Optional[float]
-            UMI redundancy or None if calculation is not possible
-        """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        if not counts:
-            return None
-
-        result = UMIRedundancy.calculate_redundancy(counts)
-        logger.debug(f"Calculated UMI redundancy: {result}")
-        return result
-
-    @classmethod
-    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
-        """Create statistic from step parameters.
-
-        Parameters
-        ----------
-        input_file : str
-            Path to input CSV file
-        sep : str, default=','
-            CSV separator
-        **step_params : Any
-            Should include:
-            - key_column: str - Column containing keys (required)
-            - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
-            - use_corrected: bool (optional) - Whether to use corrected counts
-
-        Returns
-        -------
-        Optional[float]
-            Calculated UMI redundancy
-        """
-        key_column = step_params.get("key_column")
-        barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", False)
-
-        if not key_column:
-            raise ValueError("key_column is required for UMIRedundancy")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
-
-        # Aggregate counts from collapse output
-        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
-        
-        # Create UMI object from aggregated counts
-        keys = list(counts_dict.keys())
-        counts = list(counts_dict.values())
-        umi = UMI()
-        for key, count in zip(keys, counts):
-            umi.consume(key, count)
-        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
-        umi._corrected_counts = umi._counts.copy()
-
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
-
-
+# TODO: Adjust this to calculate the error rate based on the score from nearest.NearestUMIFinder._calculate_alignment_score
 class ErrorRate(BaseStatistic):
     """Calculate error rate by comparing original and corrected columns.
 

@@ -22,7 +22,6 @@ from outerspace.stats import (
     UMIRecoveryRate,
     UMIEfficiencyRate,
     UMIErrorRate,
-    UMIRedundancy,
     ErrorRate,
 )
 
@@ -40,10 +39,10 @@ STAT_REGISTRY: Dict[str, Type[BaseStatistic]] = {
     "umi_recovery_rate": UMIRecoveryRate,
     "umi_efficiency_rate": UMIEfficiencyRate,
     "umi_error_rate": UMIErrorRate,
-    "umi_redundancy": UMIRedundancy,
     "error_rate": ErrorRate,
 }
 
+# TODO: refactor to allow for multi-threading at the file:step level
 
 class StatsCommand(BaseCommand):
     """Command for calculating statistics using config-defined metrics.

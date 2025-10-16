@@ -12,7 +12,6 @@ from outerspace.stats import (
     SimpsonDiversity,
     UMIRecoveryRate,
     UMIEfficiencyRate,
-    UMIRedundancy,
     ErrorRate,
 )
 
@@ -139,18 +138,6 @@ def test_simpson_from_step(simple_csv_file):
     
     assert result is not None
     assert 0 <= result <= 1
-
-
-def test_redundancy_from_step(simple_csv_file):
-    """Test UMIRedundancy._from_step"""
-    result = UMIRedundancy._from_step(
-        simple_csv_file,
-        key_column="key",
-        barcode_column="count"
-    )
-    
-    assert result is not None
-    assert result > 0  # Should be greater than 0
 
 
 def test_recovery_rate_from_step(simple_csv_file, allowed_list_file):
