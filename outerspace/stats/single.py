@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Sequence, Any, Set
 import numpy as np
 import pandas as pd
 from ..umi import UMI
+from ..nearest import NearestUMIFinder
 from .base import BaseStatistic
 from .utils import split_counts_by_allowed_list
 
@@ -852,12 +853,13 @@ class UMIEfficiencyRate(UMIStats):
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
 
-# TODO: Adjust this to calculate the error rate based on the score from nearest.NearestUMIFinder._calculate_alignment_score
 class ErrorRate(BaseStatistic):
-    """Calculate error rate by comparing original and corrected columns.
+    """Calculate error rate by comparing original and corrected columns using alignment scoring.
 
     This class compares two columns from a CSV file to calculate the
-    error rate based on Hamming distance between corresponding values.
+    error rate based on alignment scores from NearestUMIFinder. The error rate
+    is calculated as the normalized difference between the maximum possible score
+    and the actual alignment score.
     """
 
     def __init__(self, umi: UMI, **kwargs: Any) -> None:
@@ -879,26 +881,6 @@ class ErrorRate(BaseStatistic):
         """
         raise NotImplementedError("Use ErrorRate._from_step() instead")
 
-    @staticmethod
-    def hamming_distance(seq1: str, seq2: str) -> int:
-        """Calculate Hamming distance between two sequences.
-
-        Parameters
-        ----------
-        seq1 : str
-            First sequence
-        seq2 : str
-            Second sequence
-
-        Returns
-        -------
-        int
-            Number of mismatches between sequences
-        """
-        if len(seq1) != len(seq2):
-            raise ValueError("Sequences must be of the same length")
-        return sum(c1 != c2 for c1, c2 in zip(seq1, seq2))
-
     @classmethod
     def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
         """Create statistic from step parameters.
@@ -911,22 +893,37 @@ class ErrorRate(BaseStatistic):
             CSV separator
         **step_params : Any
             Should include:
-            - original_column: str - Column with original values
-            - corrected_column: str - Column with corrected values
+            - original_column: str - Column with original values (required)
+            - corrected_column: str - Column with corrected values (required)
+            - mismatch_penalty: int - Penalty for mismatches (default: -1)
+            - gap_penalty: int - Penalty for gaps (default: -3)
+            - match_score: int - Score for matches (default: 1)
 
         Returns
         -------
         Optional[float]
-            Calculated error rate (errors per position)
+            Calculated error rate (normalized between 0 and 1, where 0 = perfect match)
+
+        Notes
+        -----
+        The error rate is calculated as:
+        error_rate = (max_possible_score - actual_score) / max_possible_score
+        
+        This uses the alignment scoring system from NearestUMIFinder, which accounts
+        for mismatches and gaps more accurately than simple Hamming distance.
         """
         original_column = step_params.get("original_column")
         corrected_column = step_params.get("corrected_column")
+        mismatch_penalty = step_params.get("mismatch_penalty", -1)
+        gap_penalty = step_params.get("gap_penalty", -3)
+        match_score = step_params.get("match_score", 1)
 
         if not original_column or not corrected_column:
             raise ValueError("Both original_column and corrected_column are required for ErrorRate")
 
-        total_mismatches = 0
-        total_positions = 0
+        total_max_score = 0
+        total_actual_score = 0
+        num_comparisons = 0
 
         with open(input_file, "r") as f:
             reader = csv.DictReader(f, delimiter=sep)
@@ -943,20 +940,33 @@ class ErrorRate(BaseStatistic):
                 if not original or not corrected:
                     continue
 
-                if len(original) != len(corrected):
-                    logger.warning(
-                        f"Skipping row with mismatched lengths: '{original}' vs '{corrected}'"
-                    )
-                    continue
+                # Calculate maximum possible score (perfect match)
+                max_score = len(original) * match_score
+                
+                # Calculate actual alignment score
+                actual_score = NearestUMIFinder._calculate_alignment_score(
+                    original,
+                    corrected,
+                    mismatch_penalty,
+                    gap_penalty,
+                    match_score,
+                    None  # No cutoff
+                )
+                
+                total_max_score += max_score
+                total_actual_score += actual_score
+                num_comparisons += 1
 
-                total_mismatches += cls.hamming_distance(original, corrected)
-                total_positions += len(original)
-
-        if total_positions == 0:
+        if total_max_score == 0 or num_comparisons == 0:
             return None
 
-        error_rate = total_mismatches / total_positions
-        logger.debug(f"Calculated error rate: {error_rate} ({total_mismatches}/{total_positions})")
+        # Calculate normalized error rate
+        error_rate = (total_max_score - total_actual_score) / total_max_score
+        logger.debug(
+            f"Calculated error rate: {error_rate:.6f} "
+            f"(max_score={total_max_score}, actual_score={total_actual_score}, "
+            f"n={num_comparisons})"
+        )
         return error_rate
 
 
