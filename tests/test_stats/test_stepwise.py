@@ -55,6 +55,26 @@ def error_rate_csv_file():
 
 
 @pytest.fixture
+def error_rate_multicolumn_csv_file():
+    """Create a CSV file with multiple original and corrected columns"""
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as f:
+        writer = csv.DictWriter(f, fieldnames=['umi1_orig', 'umi2_orig', 'umi1_corr', 'umi2_corr'])
+        writer.writeheader()
+        # Perfect match
+        writer.writerow({'umi1_orig': 'AAAA', 'umi2_orig': 'TTTT', 'umi1_corr': 'AAAA', 'umi2_corr': 'TTTT'})
+        # Error in first UMI
+        writer.writerow({'umi1_orig': 'ATTT', 'umi2_orig': 'CCCC', 'umi1_corr': 'AAAA', 'umi2_corr': 'CCCC'})
+        # Error in second UMI
+        writer.writerow({'umi1_orig': 'GGGG', 'umi2_orig': 'CCCT', 'umi1_corr': 'GGGG', 'umi2_corr': 'CCCC'})
+        # Errors in both
+        writer.writerow({'umi1_orig': 'AAAT', 'umi2_orig': 'TTTG', 'umi1_corr': 'AAAA', 'umi2_corr': 'TTTT'})
+        filepath = f.name
+    
+    yield filepath
+    os.unlink(filepath)
+
+
+@pytest.fixture
 def allowed_list_file():
     """Create an allowed list file"""
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
@@ -314,6 +334,32 @@ def test_error_rate_max_items(error_rate_csv_file):
     # The results should be different because we're processing different numbers of rows
     # (unless by chance they have the same error rate)
     # We can't assert they're different, but we can verify both work
+
+
+def test_error_rate_multicolumn(error_rate_multicolumn_csv_file):
+    """Test ErrorRate._from_step with comma-separated column lists"""
+    # Test with multiple columns
+    result = ErrorRate._from_step(
+        error_rate_multicolumn_csv_file,
+        original_column="umi1_orig,umi2_orig",
+        corrected_column="umi1_corr,umi2_corr"
+    )
+    
+    assert result is not None
+    # Error rate should be between 0 and 1
+    assert 0 <= result <= 1
+    # The test file has some errors, so it should be > 0
+    assert result > 0
+    
+    # Test with single column (should also work)
+    result_single = ErrorRate._from_step(
+        error_rate_multicolumn_csv_file,
+        original_column="umi1_orig",
+        corrected_column="umi1_corr"
+    )
+    
+    assert result_single is not None
+    assert 0 <= result_single <= 1
 
 
 # Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved.
