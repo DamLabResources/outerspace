@@ -78,6 +78,11 @@ class StatsCommand(BaseCommand):
             default=1,
             help="Number of threads for parallel file processing (default: 1)",
         )
+        parser.add_argument(
+            "-o",
+            "--output-file",
+            help="Output CSV file (default: stdout)",
+        )
         self._add_common_args(parser)
 
     def _calculate_stats_for_file(
@@ -310,10 +315,17 @@ class StatsCommand(BaseCommand):
 
             logger.info(f"Successfully processed {len(all_stats)} files")
 
-            # Write all results to stdout as CSV
-            writer = csv.DictWriter(sys.stdout, fieldnames=all_stats[0].keys())
-            writer.writeheader()
-            writer.writerows(all_stats)
+            # Write all results to output file or stdout
+            if self.args.output_file:
+                logger.info(f"Writing results to {self.args.output_file}")
+                with open(self.args.output_file, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=all_stats[0].keys())
+                    writer.writeheader()
+                    writer.writerows(all_stats)
+            else:
+                writer = csv.DictWriter(sys.stdout, fieldnames=all_stats[0].keys())
+                writer.writeheader()
+                writer.writerows(all_stats)
 
             logger.info("Statistics calculation completed successfully")
 

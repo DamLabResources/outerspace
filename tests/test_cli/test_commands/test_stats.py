@@ -241,4 +241,42 @@ name = "simpson"
         cli.run()
 
 
+def test_stats_with_output_file():
+    """Test stats command with output file option"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create config file
+        config_file = os.path.join(temp_dir, "config.toml")
+        with open(config_file, "w") as f:
+            f.write(
+                """[[stats.metrics]]
+method = "gini_coefficient"
+key_column = "protospacer"
+barcode_column = "count"
+name = "gini"
+"""
+            )
+
+        # Create test input file
+        input_file = os.path.join(temp_dir, "test.csv")
+        with open(input_file, "w") as f:
+            f.write("protospacer,count\n")
+            f.write("A,10\n")
+            f.write("B,5\n")
+            f.write("C,3\n")
+
+        # Test with output file
+        output_file = os.path.join(temp_dir, "output.csv")
+        args = ["stats", "--config", config_file, "-o", output_file, input_file]
+        cli = Cli(args)
+        cli.run()
+
+        # Verify output file was created and has content
+        assert os.path.exists(output_file)
+        with open(output_file, "r") as f:
+            content = f.read()
+            assert "filename" in content
+            assert "gini" in content
+            assert "test.csv" in content
+
+
 # Copyright (C) 2025, SC Barrera, Drs DVK & WND. All Rights Reserved.
