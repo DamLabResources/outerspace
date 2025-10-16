@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 from argparse import ArgumentParser
 
+from tqdm import tqdm
+
 from outerspace.cli.commands.base import BaseCommand
 from outerspace.stats import (
     BaseStatistic,
@@ -83,6 +85,7 @@ class StatsCommand(BaseCommand):
         input_file: str,
         metrics: List[Dict[str, Any]],
         sep: str = ",",
+        pbar: Optional[tqdm] = None,
     ) -> Dict[str, Any]:
         """Calculate all configured metrics for a single input file.
 
@@ -94,6 +97,8 @@ class StatsCommand(BaseCommand):
             List of metric configurations from config file
         sep : str, default=','
             CSV separator
+        pbar : Optional[tqdm], default=None
+            Optional progress bar to update after processing
 
         Returns
         -------
@@ -105,9 +110,25 @@ class StatsCommand(BaseCommand):
         ValueError
             If metric method is not found in registry or calculation fails
         """
-        logger.info(f"Calculating statistics for {os.path.basename(input_file)}")
+        filename = os.path.basename(input_file)
+        
+        # Use tqdm.write for logging to avoid conflicts with progress bars
+        if pbar is not None:
+            tqdm.write(f"Processing {filename}...")
+        else:
+            logger.info(f"Calculating statistics for {filename}")
 
-        stats = {"filename": os.path.basename(input_file)}
+        stats = {"filename": filename}
+
+        # Create a nested progress bar for metrics if we're showing progress
+        metric_pbar = None
+        if pbar is not None and len(metrics) > 1:
+            metric_pbar = tqdm(
+                total=len(metrics),
+                desc=f"  Metrics",
+                leave=False,
+                position=1,
+            )
 
         for metric_config in metrics:
             method = metric_config.get("method")
@@ -136,14 +157,44 @@ class StatsCommand(BaseCommand):
                 result = stat_class._from_step(input_file, sep=sep, **step_params)
                 stats[name] = result
 
-                if result is not None:
-                    logger.info(f"  {name}: {result:.6f}")
+                # Log result
+                if pbar is not None:
+                    # Use tqdm.write to avoid conflicts with progress bars
+                    if result is not None:
+                        if isinstance(result, dict):
+                            tqdm.write(f"    {name}: {result}")
+                        else:
+                            tqdm.write(f"    {name}: {result:.6f}")
+                    else:
+                        tqdm.write(f"    {name}: None")
                 else:
-                    logger.info(f"  {name}: None")
+                    if result is not None:
+                        if isinstance(result, dict):
+                            logger.info(f"  {name}: {result}")
+                        else:
+                            logger.info(f"  {name}: {result:.6f}")
+                    else:
+                        logger.info(f"  {name}: None")
+                
+                # Update metric progress bar
+                if metric_pbar is not None:
+                    metric_pbar.update(1)
 
             except Exception as e:
+                if pbar is not None:
+                    tqdm.write(f"ERROR: Failed to calculate {name}: {e}")
                 logger.error(f"Error calculating {name} ({method}) with params {step_params}: {e}")
+                if metric_pbar is not None:
+                    metric_pbar.close()
                 raise ValueError(f"Failed to calculate {name}: {e}")
+
+        # Close metric progress bar if it was created
+        if metric_pbar is not None:
+            metric_pbar.close()
+        
+        # Update main progress bar
+        if pbar is not None:
+            pbar.update(1)
 
         return stats
 
@@ -200,6 +251,14 @@ class StatsCommand(BaseCommand):
             # Process files with optional multi-threading
             all_stats = []
             
+            # Create progress bar for file processing
+            file_pbar = tqdm(
+                total=len(input_files),
+                desc="Processing files",
+                unit="file",
+                position=0,
+            )
+            
             if self.args.threads > 1:
                 logger.info(f"Processing {len(input_files)} files with {self.args.threads} threads")
                 
@@ -211,7 +270,8 @@ class StatsCommand(BaseCommand):
                             self._calculate_stats_for_file,
                             input_file,
                             metrics,
-                            self.args.sep
+                            self.args.sep,
+                            file_pbar
                         ): input_file
                         for input_file in input_files
                     }
@@ -223,6 +283,7 @@ class StatsCommand(BaseCommand):
                             stats = future.result()
                             all_stats.append(stats)
                         except Exception as e:
+                            tqdm.write(f"ERROR: Error processing {input_file}: {e}")
                             logger.error(f"Error processing {input_file}: {e}")
             else:
                 # Single-threaded processing
@@ -232,11 +293,17 @@ class StatsCommand(BaseCommand):
                             input_file,
                             metrics,
                             sep=self.args.sep,
+                            pbar=file_pbar,
                         )
                         all_stats.append(stats)
                     except Exception as e:
+                        tqdm.write(f"ERROR: Error processing {input_file}: {e}")
                         logger.error(f"Error processing {input_file}: {e}")
+                        file_pbar.update(1)
                         continue
+            
+            # Close the progress bar
+            file_pbar.close()
 
             if not all_stats:
                 raise ValueError("No files were successfully processed")
