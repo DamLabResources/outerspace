@@ -10,10 +10,9 @@ from .single import (
     GiniCoefficient,
     ShannonDiversity,
     SimpsonDiversity,
+    HillNumber,
     UMIRecoveryRate,
     UMIEfficiencyRate,
-    UMIErrorRate,
-    UMIRedundancy,
     ErrorRate,
 )
 
@@ -38,10 +37,9 @@ __all__ = [
     "GiniCoefficient",
     "ShannonDiversity",
     "SimpsonDiversity",
+    "HillNumber",
     "UMIRecoveryRate",
     "UMIEfficiencyRate",
-    "UMIErrorRate",
-    "UMIRedundancy",
     "ErrorRate",
     "JaccardSimilarity",
     "BrayCurtisDissimilarity",

@@ -36,6 +36,10 @@ args = [
 # Add CSV input files
 args.extend(csv_files)
 
+# Add threads parameter if available
+if hasattr(snakemake, 'threads') and snakemake.threads > 1:
+    args.extend(['--threads', str(snakemake.threads)])
+
 # Redirect stdout to output file since stats command writes to stdout
 original_stdout = sys.stdout
 with open(output_file, 'w') as f:

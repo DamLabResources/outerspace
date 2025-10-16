@@ -31,7 +31,7 @@ pattern_names = ["UMI_5prime", "protospacer", "UMI_3prime"]
 matches_only = true
 
 [collapse]
-threads = 8
+threads = 1
 
 
 # Iterative collapse steps (recommended approach)
@@ -58,26 +58,15 @@ rescue_min_overlap = 8
 barcode_column = 'UMI_5prime_UMI_3prime_corrected'
 key_column = 'protospacer_corrected'
 
-[gini]
-column = 'UMI_5prime_UMI_3prime_corrected_count'
-
 [merge]
 column = 'UMI_5prime_UMI_3prime_corrected_count'
 key_column = 'protospacer_corrected'
 
 # Statistics metrics to calculate
-[[stats.metrics]]
-method = "simpson_diversity"
-key_column = "protospacer_corrected"
-barcode_column = "UMI_5prime_UMI_3prime_corrected"
-name = "protospacer_simpson"
+# Available methods: gini_coefficient, shannon_diversity, simpson_diversity, 
+#                    hill_number, umi_recovery_rate, umi_efficiency_rate, error_rate
 
-[[stats.metrics]]
-method = "shannon_diversity"
-key_column = "protospacer_corrected"
-barcode_column = "UMI_5prime_UMI_3prime_corrected"
-name = "protospacer_shannon"
-
+# Diversity metrics (no allowed_list needed)
 [[stats.metrics]]
 method = "gini_coefficient"
 key_column = "protospacer_corrected"
@@ -85,11 +74,38 @@ barcode_column = "UMI_5prime_UMI_3prime_corrected"
 name = "protospacer_gini"
 
 [[stats.metrics]]
-method = "umi_redundancy"
+method = "shannon_diversity"
 key_column = "protospacer_corrected"
 barcode_column = "UMI_5prime_UMI_3prime_corrected"
-name = "protospacer_redundancy"
+base = 2.0  # Optional: base for logarithm (default: 2.0 for bits)
+name = "protospacer_shannon"
 
+[[stats.metrics]]
+method = "simpson_diversity"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+name = "protospacer_simpson"
+
+# Hill numbers - unified diversity measure
+# q parameter can be:
+#   - Number: 0, 1, 2, 1.5, etc.
+#   - Keyword: "richness" (q=0), "shannon" (q=1), "simpson" (q=2)
+#   - Comma-separated list: "richness, shannon, simpson" (returns dict)
+[[stats.metrics]]
+method = "hill_number"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+q = "shannon"  # q=1: Exponential of Shannon entropy
+name = "protospacer_hill_shannon"
+
+[[stats.metrics]]
+method = "hill_number"
+key_column = "protospacer_corrected"
+barcode_column = "UMI_5prime_UMI_3prime_corrected"
+q = 2.0  # q=2: Inverse Simpson concentration
+name = "protospacer_hill_simpson"
+
+# Recovery and efficiency metrics (require allowed_list)
 [[stats.metrics]]
 method = "umi_recovery_rate"
 key_column = "protospacer_corrected"
@@ -103,6 +119,17 @@ key_column = "protospacer_corrected"
 barcode_column = "UMI_5prime_UMI_3prime_corrected"
 allowed_list = "data/library_protospacers.txt"
 name = "protospacer_efficiency_rate"
+
+# Error rate using alignment scoring
+# Compares original vs corrected sequences using alignment scores
+[[stats.metrics]]
+method = "error_rate"
+original_column = "protospacer"
+corrected_column = "protospacer_corrected"
+mismatch_penalty = -1  # Optional: penalty for mismatches (default: -1)
+gap_penalty = -3       # Optional: penalty for gaps (default: -3)
+match_score = 1        # Optional: score for matches (default: 1)
+name = "protospacer_error_rate"
 
 [owner]
 name = "SCB, DK, WND, RB"

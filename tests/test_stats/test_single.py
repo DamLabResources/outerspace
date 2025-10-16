@@ -10,10 +10,10 @@ from outerspace.stats.single import (
     GiniCoefficient,
     ShannonDiversity,
     SimpsonDiversity,
+    HillNumber,
     UMIRecoveryRate,
     UMIEfficiencyRate,
-    UMIErrorRate,
-    UMIRedundancy,
+    ErrorRate,
 )
 
 # List of all single UMI stat classes to test
@@ -21,10 +21,15 @@ SINGLE_STAT_CLASSES = [
     GiniCoefficient,
     ShannonDiversity,
     SimpsonDiversity,
+    HillNumber,
     UMIRecoveryRate,
     UMIEfficiencyRate,
-    UMIErrorRate,
-    UMIRedundancy,
+]
+
+# Classes that support allowed_list
+ALLOWED_LIST_CLASSES = [
+    UMIRecoveryRate,
+    UMIEfficiencyRate,
 ]
 
 
@@ -82,7 +87,7 @@ def test_single_stat_with_allowed_list(empty_umi):
     """Test that single stats handle allowed_list parameter correctly"""
     allowed_list = ["AAAAAA", "TTTTTT"]
 
-    for stat_class in SINGLE_STAT_CLASSES:
+    for stat_class in ALLOWED_LIST_CLASSES:
         # Test calculate method with allowed_list
         result = stat_class.calculate(empty_umi, allowed_list=allowed_list)
         assert isinstance(

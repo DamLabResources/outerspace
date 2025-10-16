@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Sequence, Any, Set
 import numpy as np
 import pandas as pd
 from ..umi import UMI
+from ..nearest import NearestUMIFinder
 from .base import BaseStatistic
 from .utils import split_counts_by_allowed_list
 
@@ -128,14 +129,13 @@ class UMIStats(BaseStatistic):
     """Base class for UMI statistics calculations.
 
     This class provides common functionality for UMI statistics calculations
-    including count access and allowed list handling.
+    including count access.
     """
 
     def __init__(
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize UMI stats calculator.
@@ -146,27 +146,11 @@ class UMIStats(BaseStatistic):
             UMI object to calculate statistics on
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
         **kwargs : Any
             Additional arguments passed to parent class
         """
         super().__init__(umi, **kwargs)
         self.use_corrected = use_corrected
-        self.allowed_list = allowed_list
-
-    @property
-    def _allowed_list(self) -> Optional[List[bytes]]:
-        """Get allowed list in bytes format.
-
-        Returns
-        -------
-        Optional[List[bytes]]
-            Allowed list converted to bytes, or None if not provided
-        """
-        if self.allowed_list:
-            return [umi.encode("ascii") for umi in self.allowed_list]
-        return None
 
     @property
     def _counts(self) -> Dict[bytes, int]:
@@ -194,7 +178,6 @@ class GiniCoefficient(UMIStats):
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Gini coefficient calculator.
 
@@ -204,11 +187,8 @@ class GiniCoefficient(UMIStats):
             UMI object to calculate statistics on
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed keys. If provided, missing keys will be
-            treated as having zero counts in the calculation.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
 
     @staticmethod
     def calculate_gini(counts: Sequence[float]) -> Optional[float]:
@@ -258,14 +238,7 @@ class GiniCoefficient(UMIStats):
         Optional[float]
             Gini coefficient or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=True
-            )
-        else:
-            counts = self._counts
-
-        result = GiniCoefficient.calculate_gini(list(counts.values()))
+        result = GiniCoefficient.calculate_gini(list(self._counts.values()))
         logger.debug(f"Calculated Gini coefficient: {result}")
         return result
 
@@ -283,7 +256,6 @@ class GiniCoefficient(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
         Returns
@@ -293,16 +265,10 @@ class GiniCoefficient(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)  # No correction needed, data is pre-collapsed
 
         if not key_column:
             raise ValueError("key_column is required for GiniCoefficient")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -317,7 +283,7 @@ class GiniCoefficient(UMIStats):
         umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
         umi._corrected_counts = umi._counts.copy()
 
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+        return cls.calculate(umi, use_corrected=use_corrected)
 
 
 class ShannonDiversity(UMIStats):
@@ -332,7 +298,6 @@ class ShannonDiversity(UMIStats):
         umi: UMI,
         use_corrected: bool = True,
         base: float = 2.0,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Shannon diversity calculator.
 
@@ -344,10 +309,8 @@ class ShannonDiversity(UMIStats):
             If True, use corrected counts. If False, use original counts.
         base : float, default=2.0
             Base of the logarithm (default: 2.0 for bits)
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
         self.base = base
 
     @staticmethod
@@ -400,14 +363,7 @@ class ShannonDiversity(UMIStats):
         Optional[float]
             Shannon diversity index or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        result = ShannonDiversity.calculate_shannon(list(counts.values()), self.base)
+        result = ShannonDiversity.calculate_shannon(list(self._counts.values()), self.base)
         logger.debug(f"Calculated Shannon diversity (base {self.base}): {result}")
         return result
 
@@ -425,7 +381,6 @@ class ShannonDiversity(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
             - base: float (optional) - Base for logarithm (default 2.0)
 
@@ -436,17 +391,11 @@ class ShannonDiversity(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)
         base = step_params.get("base", 2.0)
 
         if not key_column:
             raise ValueError("key_column is required for ShannonDiversity")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -460,7 +409,7 @@ class ShannonDiversity(UMIStats):
         umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
         umi._corrected_counts = umi._counts.copy()
 
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list, base=base)
+        return cls.calculate(umi, use_corrected=use_corrected, base=base)
 
 
 class SimpsonDiversity(UMIStats):
@@ -474,7 +423,6 @@ class SimpsonDiversity(UMIStats):
         self,
         umi: UMI,
         use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
     ) -> None:
         """Initialize Simpson's diversity calculator.
 
@@ -484,11 +432,8 @@ class SimpsonDiversity(UMIStats):
             UMI object to calculate statistics on
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed keys. If provided, missing keys will be
-            treated as having zero counts in the calculation.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
 
     @staticmethod
     def calculate_simpson(counts: Sequence[float]) -> Optional[float]:
@@ -536,14 +481,7 @@ class SimpsonDiversity(UMIStats):
         Optional[float]
             Simpson's diversity index or None if calculation is not possible
         """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        result = SimpsonDiversity.calculate_simpson(list(counts.values()))
+        result = SimpsonDiversity.calculate_simpson(list(self._counts.values()))
         logger.debug(f"Calculated Simpson diversity: {result}")
         return result
 
@@ -561,7 +499,6 @@ class SimpsonDiversity(UMIStats):
             Should include:
             - key_column: str - Column containing keys (required)
             - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
             - use_corrected: bool (optional) - Whether to use corrected counts
 
         Returns
@@ -571,16 +508,10 @@ class SimpsonDiversity(UMIStats):
         """
         key_column = step_params.get("key_column")
         barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
         use_corrected = step_params.get("use_corrected", False)
 
         if not key_column:
             raise ValueError("key_column is required for SimpsonDiversity")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
 
         # Aggregate counts from collapse output
         counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
@@ -594,7 +525,245 @@ class SimpsonDiversity(UMIStats):
         umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
         umi._corrected_counts = umi._counts.copy()
 
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
+        return cls.calculate(umi, use_corrected=use_corrected)
+
+
+def _parse_q_parameter(q_param: Any) -> List[float]:
+    """Parse q parameter into list of float values.
+    
+    Parameters
+    ----------
+    q_param : Any
+        Can be a number, a string word, or a comma-separated string
+        
+    Returns
+    -------
+    List[float]
+        List of q values to calculate
+        
+    Notes
+    -----
+    Supported string keywords:
+    - "richness": q=0
+    - "shannon": q=1
+    - "simpson": q=2
+    """
+    # Mapping of keywords to q values
+    keyword_map = {
+        "richness": 0.0,
+        "shannon": 1.0,
+        "simpson": 2.0,
+    }
+    
+    # If it's already a number, return it as a list
+    if isinstance(q_param, (int, float)):
+        return [float(q_param)]
+    
+    # If it's a string, parse it
+    if isinstance(q_param, str):
+        # Split by comma in case it's a list
+        parts = [p.strip() for p in q_param.split(",")]
+        q_values = []
+        
+        for part in parts:
+            # Try to convert to float first
+            try:
+                q_values.append(float(part))
+            except ValueError:
+                # If not a number, check if it's a keyword
+                part_lower = part.lower()
+                if part_lower in keyword_map:
+                    q_values.append(keyword_map[part_lower])
+                else:
+                    raise ValueError(
+                        f"Invalid q parameter '{part}'. "
+                        f"Must be a number or one of: {', '.join(keyword_map.keys())}"
+                    )
+        
+        return q_values
+    
+    raise ValueError(f"Invalid q parameter type: {type(q_param)}")
+
+
+class HillNumber(UMIStats):
+    """Calculate Hill numbers for diversity analysis.
+    
+    Hill numbers are a mathematically unified family of diversity indices
+    differing among themselves only by an exponent q that determines their
+    sensitivity to species relative abundances.
+    """
+
+    def __init__(
+        self,
+        umi: UMI,
+        q: float = 1.0,
+        use_corrected: bool = True,
+    ) -> None:
+        """Initialize Hill number calculator.
+
+        Parameters
+        ----------
+        umi : UMI
+            UMI object to calculate statistics on
+        q : float, default=1.0
+            Order of the Hill number. Common values:
+            - q=0: Species richness (count of species)
+            - q=1: Exponential of Shannon entropy
+            - q=2: Inverse Simpson concentration
+            - q→∞: Inverse of max proportional abundance
+        use_corrected : bool, default=True
+            If True, use corrected counts. If False, use original counts.
+        """
+        super().__init__(umi, use_corrected)
+        self.q = q
+
+    @staticmethod
+    def calculate_hill(counts: Sequence[float], q: float) -> Optional[float]:
+        """Calculate Hill number for given q parameter.
+
+        Parameters
+        ----------
+        counts : Sequence[float]
+            Sequence of count values
+        q : float
+            Order of the Hill number
+
+        Returns
+        -------
+        Optional[float]
+            Hill number or None if calculation is not possible
+
+        Notes
+        -----
+        Hill numbers are a generalized diversity measure calculated as:
+        
+        For q ≠ 1:
+            D_q = (sum(p_i^q))^(1/(1-q))
+            
+        For q = 1 (limit as q→1):
+            D_1 = exp(-sum(p_i * ln(p_i))) = exp(H)
+            where H is Shannon entropy
+            
+        Special cases:
+        - q=0: Species richness (count of non-zero elements)
+        - q=1: Exponential of Shannon entropy
+        - q=2: Inverse Simpson concentration (1 / sum(p_i^2))
+        - q→∞: Inverse of max proportional abundance (1 / max(p_i))
+        
+        References
+        ----------
+        Hill, M. O. (1973). Diversity and evenness: a unifying notation and its
+        consequences. Ecology, 54(2), 427-432.
+        """
+        if not counts:
+            return None
+
+        # Filter out zero counts
+        counts_array = np.array([c for c in counts if c > 0])
+        
+        if len(counts_array) == 0:
+            return None
+            
+        total = np.sum(counts_array)
+        
+        if total == 0:
+            return None
+
+        # Calculate proportions
+        proportions = counts_array / total
+
+        # Special case: q = 0 (species richness)
+        if q == 0:
+            return float(len(counts_array))
+        
+        # Special case: q = 1 (exponential Shannon entropy)
+        # Use limit as q→1: exp(-sum(p_i * ln(p_i)))
+        elif abs(q - 1.0) < 1e-9:  # Close to 1
+            shannon = -np.sum(proportions * np.log(proportions))
+            return float(np.exp(shannon))
+        
+        # General case: q ≠ 1
+        else:
+            sum_p_q = np.sum(proportions ** q)
+            hill = sum_p_q ** (1 / (1 - q))
+            return float(hill)
+
+    def run(self) -> Optional[float]:
+        """Calculate Hill number for the UMI object.
+
+        Returns
+        -------
+        Optional[float]
+            Hill number or None if calculation is not possible
+        """
+        result = HillNumber.calculate_hill(list(self._counts.values()), self.q)
+        logger.debug(f"Calculated Hill number (q={self.q}): {result}")
+        return result
+
+    @classmethod
+    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Any:
+        """Create statistic from step parameters.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to collapse output CSV file
+        sep : str, default=','
+            CSV separator
+        **step_params : Any
+            Should include:
+            - key_column: str - Column containing keys (required)
+            - barcode_column: str (optional) - If provided, count unique barcodes per key
+            - use_corrected: bool (optional) - Whether to use corrected counts
+            - q: float, str, or comma-separated str - Order parameter(s) (required)
+              Can be:
+              - A number: 0, 1, 2, 1.5, etc.
+              - A keyword: "richness" (0), "shannon" (1), "simpson" (2)
+              - Comma-separated: "richness, shannon, simpson, 1.5"
+
+        Returns
+        -------
+        float or Dict[str, float]
+            If single q value: returns float
+            If multiple q values: returns dict mapping q names to values
+        """
+        key_column = step_params.get("key_column")
+        barcode_column = step_params.get("barcode_column")
+        use_corrected = step_params.get("use_corrected", False)
+        q_param = step_params.get("q")
+
+        if not key_column:
+            raise ValueError("key_column is required for HillNumber")
+        if q_param is None:
+            raise ValueError("q parameter is required for HillNumber")
+
+        # Parse q parameter
+        q_values = _parse_q_parameter(q_param)
+
+        # Aggregate counts from collapse output
+        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
+        
+        # Create UMI object from aggregated counts
+        keys = list(counts_dict.keys())
+        counts = list(counts_dict.values())
+        umi = UMI()
+        for key, count in zip(keys, counts):
+            umi.consume(key, count)
+        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
+        umi._corrected_counts = umi._counts.copy()
+
+        # If single q value, return single result
+        if len(q_values) == 1:
+            return cls.calculate(umi, q=q_values[0], use_corrected=use_corrected)
+        
+        # If multiple q values, return dict
+        results = {}
+        for q in q_values:
+            result = cls.calculate(umi, q=q, use_corrected=use_corrected)
+            results[f"q={q}"] = result
+        
+        return results
+
 
 
 class UMIRecoveryRate(UMIStats):
@@ -624,7 +793,21 @@ class UMIRecoveryRate(UMIStats):
             If not provided, assumes exponential distribution and calculates
             theoretical recovery rate.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
+        self.allowed_list = allowed_list
+    
+    @property
+    def _allowed_list(self) -> Optional[List[bytes]]:
+        """Get allowed list in bytes format.
+
+        Returns
+        -------
+        Optional[List[bytes]]
+            Allowed list converted to bytes, or None if not provided
+        """
+        if self.allowed_list:
+            return [umi.encode("ascii") for umi in self.allowed_list]
+        return None
 
     @staticmethod
     def calculate_recovery_rate_limited(
@@ -741,7 +924,21 @@ class UMIEfficiencyRate(UMIStats):
         use_corrected : bool, default=True
             If True, use corrected counts. If False, use original counts.
         """
-        super().__init__(umi, use_corrected, allowed_list)
+        super().__init__(umi, use_corrected)
+        self.allowed_list = allowed_list
+    
+    @property
+    def _allowed_list(self) -> Optional[List[bytes]]:
+        """Get allowed list in bytes format.
+
+        Returns
+        -------
+        Optional[List[bytes]]
+            Allowed list converted to bytes, or None if not provided
+        """
+        if self.allowed_list:
+            return [umi.encode("ascii") for umi in self.allowed_list]
+        return None
 
     @staticmethod
     def calculate_efficiency_rate(
@@ -847,231 +1044,13 @@ class UMIEfficiencyRate(UMIStats):
         return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
 
 
-class UMIErrorRate(BaseStatistic):
-    """Calculate UMI error rate based on mismatches between original and corrected UMIs.
-
-    The UMI error rate measures the average number of mismatches per read
-    between original and corrected UMI sequences.
-    """
-
-    def __init__(self, umi: UMI, **kwargs: Any) -> None:
-        """Initialize UMI error rate calculator.
-
-        Parameters
-        ----------
-        umi : UMI
-            UMI object to calculate statistics on
-        **kwargs : Any
-            Additional arguments passed to parent class
-        """
-        super().__init__(umi, **kwargs)
-
-    @staticmethod
-    def hamming_distance(seq1: bytes, seq2: bytes) -> int:
-        """Calculate Hamming distance between two sequences.
-
-        Parameters
-        ----------
-        seq1 : bytes
-            First sequence
-        seq2 : bytes
-            Second sequence
-
-        Returns
-        -------
-        int
-            Number of mismatches between sequences
-
-        Raises
-        ------
-        ValueError
-            If sequences are of different lengths
-        """
-        if len(seq1) != len(seq2):
-            raise ValueError("Sequences must be of the same length")
-        return sum(c1 != c2 for c1, c2 in zip(seq1, seq2))
-
-    @staticmethod
-    def calculate_error_rate(
-        mapping: Dict[bytes, bytes], counts: Dict[bytes, int]
-    ) -> Optional[float]:
-        """Calculate UMI error rate from mismatches and total reads.
-
-        Parameters
-        ----------
-        mapping : Dict[bytes, bytes]
-            Dictionary of original and corrected UMIs
-        counts : Dict[bytes, int]
-            Dictionary of UMIs and their counts
-
-        Returns
-        -------
-        Optional[float]
-            UMI error rate or None if calculation is not possible
-
-        Notes
-        -----
-        UMI error rate is calculated as total mismatches / total reads
-        """
-        # Calculate total mismatches
-        if not mapping or not counts:
-            return None
-
-        total_mismatches = 0
-        for original, corrected in mapping.items():
-            if original != corrected:  # Only calculate mismatches if UMI was corrected
-                mismatches = UMIErrorRate.hamming_distance(original, corrected)
-                total_mismatches += mismatches * counts[original]
-
-        total_reads = sum(counts.values())
-
-        return total_mismatches / total_reads
-
-    def run(self) -> Optional[float]:
-        """Calculate UMI error rate for the UMI object.
-
-        Returns
-        -------
-        Optional[float]
-            UMI error rate or None if calculation is not possible
-        """
-        if not self.umi._mapping or not self.umi._counts:
-            return None
-
-        result = UMIErrorRate.calculate_error_rate(self.umi._mapping, self.umi._counts)
-        logger.debug(f"Calculated UMI error rate: {result}")
-        return result
-
-
-class UMIRedundancy(UMIStats):
-    """Calculate UMI redundancy (average reads per unique UMI).
-
-    UMI redundancy measures the average number of reads per unique UMI,
-    indicating how much sequencing depth is available per unique sequence.
-    """
-
-    def __init__(
-        self,
-        umi: UMI,
-        use_corrected: bool = True,
-        allowed_list: Optional[List[str]] = None,
-    ) -> None:
-        """Initialize UMI redundancy calculator.
-
-        Parameters
-        ----------
-        umi : UMI
-            UMI object to calculate statistics on
-        use_corrected : bool, default=True
-            If True, use corrected counts. If False, use original counts.
-        allowed_list : Optional[List[str]], default=None
-            Optional list of allowed UMIs for filtering
-        """
-        super().__init__(umi, use_corrected, allowed_list)
-
-    @staticmethod
-    def calculate_redundancy(counts: Dict[bytes, int]) -> Optional[float]:
-        """Calculate UMI redundancy from total and unique counts.
-
-        Parameters
-        ----------
-        counts : Dict[bytes, int]
-            Dictionary of UMIs and their counts
-
-        Returns
-        -------
-        Optional[float]
-            UMI redundancy or None if calculation is not possible
-
-        Notes
-        -----
-        UMI redundancy is calculated as total_reads / unique_umis
-        """
-        total_reads = sum(counts.values())
-        unique_umis = len(counts)
-
-        if unique_umis == 0:
-            return None
-
-        return total_reads / unique_umis
-
-    def run(self) -> Optional[float]:
-        """Calculate UMI redundancy for the UMI object.
-
-        Returns
-        -------
-        Optional[float]
-            UMI redundancy or None if calculation is not possible
-        """
-        if self.allowed_list:
-            counts, _, _ = split_counts_by_allowed_list(
-                self._counts, self._allowed_list, add_missing=False
-            )
-        else:
-            counts = self._counts
-
-        if not counts:
-            return None
-
-        result = UMIRedundancy.calculate_redundancy(counts)
-        logger.debug(f"Calculated UMI redundancy: {result}")
-        return result
-
-    @classmethod
-    def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
-        """Create statistic from step parameters.
-
-        Parameters
-        ----------
-        input_file : str
-            Path to input CSV file
-        sep : str, default=','
-            CSV separator
-        **step_params : Any
-            Should include:
-            - key_column: str - Column containing keys (required)
-            - barcode_column: str (optional) - If provided, count unique barcodes per key
-            - allowed_list: str (optional) - Path to allowed list file
-            - use_corrected: bool (optional) - Whether to use corrected counts
-
-        Returns
-        -------
-        Optional[float]
-            Calculated UMI redundancy
-        """
-        key_column = step_params.get("key_column")
-        barcode_column = step_params.get("barcode_column")
-        allowed_list_path = step_params.get("allowed_list")
-        use_corrected = step_params.get("use_corrected", False)
-
-        if not key_column:
-            raise ValueError("key_column is required for UMIRedundancy")
-
-        # Load allowed list if provided
-        allowed_list = None
-        if allowed_list_path:
-            allowed_list = _read_allowed_list(allowed_list_path)
-
-        # Aggregate counts from collapse output
-        counts_dict = _aggregate_counts_from_csv(input_file, key_column, barcode_column, sep)
-        
-        # Create UMI object from aggregated counts
-        keys = list(counts_dict.keys())
-        counts = list(counts_dict.values())
-        umi = UMI()
-        for key, count in zip(keys, counts):
-            umi.consume(key, count)
-        umi._mapping = {k.encode() if isinstance(k, str) else k: k.encode() if isinstance(k, str) else k for k in keys}
-        umi._corrected_counts = umi._counts.copy()
-
-        return cls.calculate(umi, use_corrected=use_corrected, allowed_list=allowed_list)
-
-
 class ErrorRate(BaseStatistic):
-    """Calculate error rate by comparing original and corrected columns.
+    """Calculate error rate by comparing original and corrected columns using alignment scoring.
 
     This class compares two columns from a CSV file to calculate the
-    error rate based on Hamming distance between corresponding values.
+    error rate based on alignment scores from NearestUMIFinder. The error rate
+    is calculated as the normalized difference between the maximum possible score
+    and the actual alignment score.
     """
 
     def __init__(self, umi: UMI, **kwargs: Any) -> None:
@@ -1093,26 +1072,6 @@ class ErrorRate(BaseStatistic):
         """
         raise NotImplementedError("Use ErrorRate._from_step() instead")
 
-    @staticmethod
-    def hamming_distance(seq1: str, seq2: str) -> int:
-        """Calculate Hamming distance between two sequences.
-
-        Parameters
-        ----------
-        seq1 : str
-            First sequence
-        seq2 : str
-            Second sequence
-
-        Returns
-        -------
-        int
-            Number of mismatches between sequences
-        """
-        if len(seq1) != len(seq2):
-            raise ValueError("Sequences must be of the same length")
-        return sum(c1 != c2 for c1, c2 in zip(seq1, seq2))
-
     @classmethod
     def _from_step(cls, input_file: str, sep: str = ",", **step_params: Any) -> Optional[float]:
         """Create statistic from step parameters.
@@ -1125,22 +1084,37 @@ class ErrorRate(BaseStatistic):
             CSV separator
         **step_params : Any
             Should include:
-            - original_column: str - Column with original values
-            - corrected_column: str - Column with corrected values
+            - original_column: str - Column with original values (required)
+            - corrected_column: str - Column with corrected values (required)
+            - mismatch_penalty: int - Penalty for mismatches (default: -1)
+            - gap_penalty: int - Penalty for gaps (default: -3)
+            - match_score: int - Score for matches (default: 1)
 
         Returns
         -------
         Optional[float]
-            Calculated error rate (errors per position)
+            Calculated error rate (normalized between 0 and 1, where 0 = perfect match)
+
+        Notes
+        -----
+        The error rate is calculated as:
+        error_rate = (max_possible_score - actual_score) / max_possible_score
+        
+        This uses the alignment scoring system from NearestUMIFinder, which accounts
+        for mismatches and gaps more accurately than simple Hamming distance.
         """
         original_column = step_params.get("original_column")
         corrected_column = step_params.get("corrected_column")
+        mismatch_penalty = step_params.get("mismatch_penalty", -1)
+        gap_penalty = step_params.get("gap_penalty", -3)
+        match_score = step_params.get("match_score", 1)
 
         if not original_column or not corrected_column:
             raise ValueError("Both original_column and corrected_column are required for ErrorRate")
 
-        total_mismatches = 0
-        total_positions = 0
+        total_max_score = 0
+        total_actual_score = 0
+        num_comparisons = 0
 
         with open(input_file, "r") as f:
             reader = csv.DictReader(f, delimiter=sep)
@@ -1157,20 +1131,33 @@ class ErrorRate(BaseStatistic):
                 if not original or not corrected:
                     continue
 
-                if len(original) != len(corrected):
-                    logger.warning(
-                        f"Skipping row with mismatched lengths: '{original}' vs '{corrected}'"
-                    )
-                    continue
+                # Calculate maximum possible score (perfect match)
+                max_score = len(original) * match_score
+                
+                # Calculate actual alignment score
+                actual_score = NearestUMIFinder._calculate_alignment_score(
+                    original,
+                    corrected,
+                    mismatch_penalty,
+                    gap_penalty,
+                    match_score,
+                    None  # No cutoff
+                )
+                
+                total_max_score += max_score
+                total_actual_score += actual_score
+                num_comparisons += 1
 
-                total_mismatches += cls.hamming_distance(original, corrected)
-                total_positions += len(original)
-
-        if total_positions == 0:
+        if total_max_score == 0 or num_comparisons == 0:
             return None
 
-        error_rate = total_mismatches / total_positions
-        logger.debug(f"Calculated error rate: {error_rate} ({total_mismatches}/{total_positions})")
+        # Calculate normalized error rate
+        error_rate = (total_max_score - total_actual_score) / total_max_score
+        logger.debug(
+            f"Calculated error rate: {error_rate:.6f} "
+            f"(max_score={total_max_score}, actual_score={total_actual_score}, "
+            f"n={num_comparisons})"
+        )
         return error_rate
 
 
