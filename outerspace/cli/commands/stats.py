@@ -9,6 +9,7 @@ import csv
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 from argparse import ArgumentParser
@@ -42,7 +43,6 @@ STAT_REGISTRY: Dict[str, Type[BaseStatistic]] = {
     "error_rate": ErrorRate,
 }
 
-# TODO: refactor to allow for multi-threading at the file:step level
 
 class StatsCommand(BaseCommand):
     """Command for calculating statistics using config-defined metrics.
@@ -70,6 +70,12 @@ class StatsCommand(BaseCommand):
             help="Input CSV file(s) to process (supports glob patterns)",
         )
         parser.add_argument("--sep", default=",", help="CSV separator (default: ,)")
+        parser.add_argument(
+            "--threads",
+            type=int,
+            default=1,
+            help="Number of threads for parallel file processing (default: 1)",
+        )
         self._add_common_args(parser)
 
     def _calculate_stats_for_file(
@@ -180,32 +186,62 @@ class StatsCommand(BaseCommand):
         logger.info(f"Found {len(metrics)} metrics to calculate")
 
         try:
-            # Process each input file
+            # Filter to existing files
+            input_files = [f for f in self.args.input_files if os.path.exists(f)]
+            
+            # Warn about missing files
+            for f in self.args.input_files:
+                if not os.path.exists(f):
+                    logger.warning(f"Input file not found: {f}")
+            
+            if not input_files:
+                raise ValueError("No input files found")
+            
+            # Process files with optional multi-threading
             all_stats = []
-            processed_files = 0
-
-            for input_file in self.args.input_files:
-                if not os.path.exists(input_file):
-                    logger.warning(f"Input file not found: {input_file}")
-                    continue
-
-                try:
-                    stats = self._calculate_stats_for_file(
-                        input_file,
-                        metrics,
-                        sep=self.args.sep,
-                    )
-                    all_stats.append(stats)
-                    processed_files += 1
-
-                except Exception as e:
-                    logger.error(f"Error processing {input_file}: {e}")
-                    continue
+            
+            if self.args.threads > 1:
+                logger.info(f"Processing {len(input_files)} files with {self.args.threads} threads")
+                
+                # Use ThreadPoolExecutor for parallel processing
+                with ThreadPoolExecutor(max_workers=self.args.threads) as executor:
+                    # Submit all tasks
+                    future_to_file = {
+                        executor.submit(
+                            self._calculate_stats_for_file,
+                            input_file,
+                            metrics,
+                            self.args.sep
+                        ): input_file
+                        for input_file in input_files
+                    }
+                    
+                    # Collect results as they complete
+                    for future in as_completed(future_to_file):
+                        input_file = future_to_file[future]
+                        try:
+                            stats = future.result()
+                            all_stats.append(stats)
+                        except Exception as e:
+                            logger.error(f"Error processing {input_file}: {e}")
+            else:
+                # Single-threaded processing
+                for input_file in input_files:
+                    try:
+                        stats = self._calculate_stats_for_file(
+                            input_file,
+                            metrics,
+                            sep=self.args.sep,
+                        )
+                        all_stats.append(stats)
+                    except Exception as e:
+                        logger.error(f"Error processing {input_file}: {e}")
+                        continue
 
             if not all_stats:
                 raise ValueError("No files were successfully processed")
 
-            logger.info(f"Successfully processed {processed_files} files")
+            logger.info(f"Successfully processed {len(all_stats)} files")
 
             # Write all results to stdout as CSV
             writer = csv.DictWriter(sys.stdout, fieldnames=all_stats[0].keys())
