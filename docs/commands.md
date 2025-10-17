@@ -268,7 +268,6 @@ Common Arguments:
   --log-level LOG_LEVEL
                         Log level (default: WARNING)
 ```
-
 ### `outerspace subsample`
 Estimates metric stability through random subsampling at various sample sizes. Features:
 - Random row-based subsampling with configurable sample sizes
