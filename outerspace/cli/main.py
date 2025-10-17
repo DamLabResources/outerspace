@@ -15,6 +15,7 @@ from outerspace.cli.commands.collapse import CollapseCommand
 from outerspace.cli.commands.count import CountCommand
 from outerspace.cli.commands.merge import MergeCommand
 from outerspace.cli.commands.stats import StatsCommand
+from outerspace.cli.commands.subsample import SubsampleCommand
 from outerspace.cli.commands.visualize import VisualizeCommand
 from outerspace.cli.commands.pipeline import PipelineCommand
 
@@ -84,6 +85,7 @@ class Cli:
             CountCommand,
             MergeCommand,
             StatsCommand,
+            SubsampleCommand,
             VisualizeCommand,
             PipelineCommand,
         ]
@@ -120,6 +122,7 @@ class Cli:
             "visualize": VisualizeCommand,
             "pipeline": PipelineCommand,
             "stats": StatsCommand,
+            "subsample": SubsampleCommand,
         }
 
         if self.args.command not in command_map:
