@@ -1,0 +1,58 @@
+site_name: OuterSpace
+site_url: https://outerspace.readthedocs.io/
+site_description: Tools for CRISPR screens, viral barcoding, and amplicon extraction
+site_author: Dam Lab
+repo_url: https://github.com/DamLabResources/outerspace
+repo_name: DamLabResources/outerspace
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.action.edit
+    - navigation.expand
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+    - toc.integrate
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Commands: commands.md
+  - Configuration: config.md
+  - Walkthrough: walkthrough.md
+  - "CLI API": cli_api.md
+  - Snakemake: snakemake.md
+  - Statistics: stats.md
+  - "Regex explainer": regex_explainer.md
+  - "Collapse steps": collapse_steps.md
+  - Tutorials:
+    - "SIV barcoding": tutorials/siv-barcoding/README.md
+    - "CRISPR screen": tutorials/crispr-screen/README.md
+    - "Pipeline (cluster)": tutorials/pipeline/README.md
+
+strict: true

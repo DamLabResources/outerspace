@@ -7,7 +7,7 @@ name = "outerspace"
 version = "0.0a1"
 description = "A code to extract sequences from fastq files when the surrounding sequence is known"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "GPL-3.0-or-later"}
 authors = [
     {name = "SB, DVK, REB, WD", email = "wnd22@drexel.edu"}
@@ -19,12 +19,37 @@ dependencies = [
     "regex",
     "umi_tools",
     "pyyaml",
-    "snakemake>=9.12",
-    "pulp>=2.3.1,<3.3",
     "numpy>=2",
     "pandas>=2",
     "pyspoa"
 ]
+
+[project.optional-dependencies]
+pipeline = [
+    "snakemake>=9.12",
+    "pulp>=2.3.1,<3.3",
+]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "coverage[toml]",
+    "tox>=4",
+    "ruff>=0.4",
+    "pre-commit",
+    "build",
+    "twine",
+]
+docs = [
+    "mkdocs>=1.5",
+    "mkdocs-material>=9",
+    "pymdown-extensions",
+]
+
+[project.urls]
+Homepage = "https://github.com/DamLabResources/outerspace"
+Repository = "https://github.com/DamLabResources/outerspace"
+Documentation = "https://outerspace.readthedocs.io/en/latest/"
+"Bug Tracker" = "https://github.com/DamLabResources/outerspace/issues"
 
 [project.scripts]
 outerspace = "outerspace.cli:main"
@@ -36,7 +61,7 @@ packages = [
     "outerspace.cli.commands",
     "outerspace.cli.utils",
     "outerspace.stats"
-] 
+]
 
 [tool.setuptools.data-files]
 "outerspace/workflow" = [
@@ -67,3 +92,59 @@ packages = [
     "workflow/wrappers/stats/environment.yaml",
     "workflow/wrappers/stats/README.md"
 ]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# Default: fast unit tests. Use `tox -e functional` or override addopts to run integration/functional.
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "-m", "not integration and not functional",
+]
+markers = [
+    "integration: end-to-end integration tests (Snakemake; opt-in via tox -e functional)",
+    "functional: long-running pipeline/CLI functional tests (opt-in via tox -e functional)",
+]
+
+[tool.coverage.run]
+source = ["outerspace"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+]
+
+[tool.coverage.paths]
+source = ["outerspace"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["outerspace", "tests"]
+exclude = [
+    "build",
+    "venv",
+    ".tox",
+    "docs",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # Pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+]
+ignore = [
+    "B008",  # function call in default argument — common in CLI
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["outerspace"]

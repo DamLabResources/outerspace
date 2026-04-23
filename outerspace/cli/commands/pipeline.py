@@ -5,10 +5,13 @@ pipelines using Snakemake. It handles configuration loading, argument parsing,
 and workflow execution with comprehensive error handling.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import shlex
 import sys
+from dataclasses import fields
 from pathlib import Path
 try:
     # Python 3.9+
@@ -19,28 +22,16 @@ except Exception:  # pragma: no cover - fallback for Python 3.8
     resource_files = None  # type: ignore
     as_file = None  # type: ignore
     _HAS_FILES_API = False
-from typing import Any, Dict, List, Optional
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from argparse import ArgumentParser
 
-import pulp
 import yaml
 
-from snakemake.api import SnakemakeApi
-from snakemake.resources import DefaultResources
-from snakemake.settings.types import (
-    ConfigSettings,
-    DAGSettings,
-    DeploymentSettings,
-    ExecutionSettings,
-    OutputSettings,
-    RemoteExecutionSettings,
-    ResourceSettings,
-    SchedulingSettings,
-    StorageSettings,
-    WorkflowSettings,
-)
-
 from outerspace.cli.commands.base import BaseCommand
+
+if TYPE_CHECKING:
+    from snakemake.resources import DefaultResources
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -48,9 +39,59 @@ logger = logging.getLogger(__name__)
 __copyright__ = "Copyright (C) 2025, SC Barrera, R Berman, Drs DVK & WND. All Rights Reserved."
 __author__ = "WND"
 
-# Monkey patch pulp.list_solvers if it doesn't exist
-if not hasattr(pulp, "list_solvers"):
-    pulp.list_solvers = pulp.listSolvers
+_PIPELINE_HELP = (
+    "Install the pipeline extra: pip install 'outerspace[pipeline]' "
+    "(requires Snakemake and its dependencies)."
+)
+
+
+def _load_pipeline_backends() -> SimpleNamespace:
+    """Import Snakemake and pulp on demand (optional [pipeline] extra)."""
+    try:
+        import pulp
+    except ImportError as e:  # pragma: no cover - env without extras
+        raise ImportError(
+            f"pulp is required for the pipeline command. {_PIPELINE_HELP}"
+        ) from e
+    if not hasattr(pulp, "list_solvers"):
+        pulp.list_solvers = pulp.listSolvers
+    try:
+        from snakemake.api import SnakemakeApi
+        from snakemake.resources import DefaultResources
+        from snakemake.settings.types import (
+            ConfigSettings,
+            DAGSettings,
+            DeploymentSettings,
+            ExecutionSettings,
+            OutputSettings,
+            RemoteExecutionSettings,
+            ResourceSettings,
+            SchedulingSettings,
+            StorageSettings,
+            WorkflowSettings,
+        )
+        from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry
+    except ImportError as e:  # pragma: no cover - env without extras
+        raise ImportError(
+            f"snakemake is required for the pipeline command. {_PIPELINE_HELP}"
+        ) from e
+
+    return SimpleNamespace(
+        pulp=pulp,
+        SnakemakeApi=SnakemakeApi,
+        DefaultResources=DefaultResources,
+        ConfigSettings=ConfigSettings,
+        DAGSettings=DAGSettings,
+        DeploymentSettings=DeploymentSettings,
+        ExecutionSettings=ExecutionSettings,
+        OutputSettings=OutputSettings,
+        RemoteExecutionSettings=RemoteExecutionSettings,
+        ResourceSettings=ResourceSettings,
+        SchedulingSettings=SchedulingSettings,
+        StorageSettings=StorageSettings,
+        WorkflowSettings=WorkflowSettings,
+        ExecutorPluginRegistry=ExecutorPluginRegistry,
+    )
 
 
 class PipelineCommand(BaseCommand):
@@ -405,13 +446,17 @@ class PipelineCommand(BaseCommand):
         logger.warning(f"No config file found in profile directory: {profile_path}")
         return {}
 
-    def _parse_default_resources(self, profile_config: Dict[str, Any]) -> Optional[DefaultResources]:
+    def _parse_default_resources(
+        self, profile_config: Dict[str, Any], backends: SimpleNamespace
+    ) -> Optional[DefaultResources]:
         """Parse default resources from profile configuration.
 
         Parameters
         ----------
         profile_config : Dict[str, Any]
             Profile configuration dictionary
+        backends : SimpleNamespace
+            Lazy-loaded snakemake / pulp module objects
 
         Returns
         -------
@@ -442,7 +487,7 @@ class PipelineCommand(BaseCommand):
             return None
         
         try:
-            default_resources = DefaultResources(args=default_resources_list)
+            default_resources = backends.DefaultResources(args=default_resources_list)
             logger.info(f"Loaded default resources from profile: {default_resources_list}")
             return default_resources
         except Exception as e:
@@ -485,6 +530,8 @@ class PipelineCommand(BaseCommand):
         logger.info(f"Additional arguments: {snakemake_args}")
 
         try:
+            b = _load_pipeline_backends()
+
             # Ensure .snakemake directory exists for logs and metadata
             snakemake_dir = Path(".snakemake")
             snakemake_dir.mkdir(exist_ok=True)
@@ -521,7 +568,7 @@ class PipelineCommand(BaseCommand):
                     logger.info(f"Using executor from profile: {executor}")
             
             # Parse default resources from profile
-            default_resources = self._parse_default_resources(profile_config)
+            default_resources = self._parse_default_resources(profile_config, b)
             
             # Configure resource settings based on executor type
             # For local/dryrun: use cores
@@ -546,28 +593,28 @@ class PipelineCommand(BaseCommand):
                 logger.info(f"Default resources: {default_resources.args}")
             
             # Create output settings (use defaults for now)
-            output_settings = OutputSettings()
+            output_settings = b.OutputSettings()
             
             # Execute with the new API
             logger.info("Starting Snakemake workflow execution")
-            with SnakemakeApi(output_settings) as snakemake_api:
+            with b.SnakemakeApi(output_settings) as snakemake_api:
                 # Create workflow with explicit workdir (defaults to current directory)
                 workflow_api = snakemake_api.workflow(
-                    resource_settings=ResourceSettings(**resource_kwargs),
-                    config_settings=ConfigSettings(
+                    resource_settings=b.ResourceSettings(**resource_kwargs),
+                    config_settings=b.ConfigSettings(
                         config=config_dict,
                         configfiles=[Path(self.args.snakemake_config)],
                     ),
-                    storage_settings=StorageSettings(),
-                    workflow_settings=WorkflowSettings(),
-                    deployment_settings=DeploymentSettings(),
+                    storage_settings=b.StorageSettings(),
+                    workflow_settings=b.WorkflowSettings(),
+                    deployment_settings=b.DeploymentSettings(),
                     snakefile=snakefile_path,
                     workdir=Path.cwd(),  # Explicitly set working directory
                 )
                 
                 # Create DAG
                 dag_api = workflow_api.dag(
-                    dag_settings=DAGSettings(),
+                    dag_settings=b.DAGSettings(),
                 )
                 
                 # Get executor-specific settings
@@ -575,10 +622,7 @@ class PipelineCommand(BaseCommand):
                 executor_settings = None
                 if executor not in ["local", "dryrun", "touch"]:
                     try:
-                        from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry
-                        from dataclasses import fields
-                        
-                        executor_plugin = ExecutorPluginRegistry().get_plugin(executor)
+                        executor_plugin = b.ExecutorPluginRegistry().get_plugin(executor)
                         
                         # Create args object with all required attributes set to None/defaults
                         # The plugin will use defaults for any None values
@@ -616,9 +660,9 @@ class PipelineCommand(BaseCommand):
                 # Execute workflow
                 dag_api.execute_workflow(
                     executor=executor,
-                    execution_settings=ExecutionSettings(),
-                    remote_execution_settings=RemoteExecutionSettings(),
-                    scheduling_settings=SchedulingSettings(),
+                    execution_settings=b.ExecutionSettings(),
+                    remote_execution_settings=b.RemoteExecutionSettings(),
+                    scheduling_settings=b.SchedulingSettings(),
                     executor_settings=executor_settings,
                 )
             

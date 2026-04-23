@@ -10,6 +10,8 @@ import logging
 from outerspace.cli.main import Cli
 from outerspace.cli.logging_config import setup_logging
 
+pytestmark = pytest.mark.functional
+
 # Set up logging
 logger = setup_logging(level=logging.DEBUG)
 

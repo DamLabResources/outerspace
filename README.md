@@ -68,4 +68,31 @@ For more detailed instructions, including how to run individual commands and per
 
 For running your tasks in parallel or on a cluster consider using our Snakemake [wrappers](wrappers.md).
 
+## Development
+
+The repository expects a **conda environment** in this clone’s `venv` directory (for example
+`/home/jupyter-will/repos/outerspace/venv`). Create or refresh it, then use that interpreter
+for all tooling:
+
+```bash
+# One-time: create env and install with dev + pipeline extras
+make venv
+# or: conda create -y -p ./venv python=3.12 && ./venv/bin/pip install -e ".[dev,pipeline]"
+
+# Run tools via the env (from repo root)
+./venv/bin/python -m tox -e py        # fast unit tests (default)
+./venv/bin/python -m tox -e ruff     # lint + format check
+./venv/bin/python -m tox -e functional   # long integration/functional tests (optional)
+
+# Or with conda run (same env)
+conda run -p /home/jupyter-will/repos/outerspace/venv python -m tox -e py
+```
+
+Shorter: `make test` and `make ruff` use `$(CURDIR)/venv` automatically. Install
+[pre-commit](https://pre-commit.com/) hooks with `pre-commit install` after the dev extra is installed.
+
+**Documentation (MkDocs):** `pip install -e ".[docs]" && mkdocs serve` (or `tox -e docs`).
+
+- **User guide (Read the Docs):** [https://outerspace.readthedocs.io/](https://outerspace.readthedocs.io/) (enable the project in RTD when ready).
+
 Copyright (C) 2025, SCB, DVK PhD, RB, WND PhD. All rights reserved.

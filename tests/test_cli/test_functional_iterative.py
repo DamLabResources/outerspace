@@ -7,6 +7,8 @@ import os
 import pytest
 from outerspace.cli.main import Cli
 
+pytestmark = pytest.mark.functional
+
 
 def test_full_workflow(temp_workspace):
     """Test the full workflow from example.sh"""
